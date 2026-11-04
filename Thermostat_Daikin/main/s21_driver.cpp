@@ -147,6 +147,10 @@ DaikinS21::DaikinS21() {
     m_powerful_dirty = false;
     m_d1_confirm_until = 0;
     m_d6_confirm_until = 0;
+    m_fan_confirm_until = 0;
+    m_rg_supported = true;
+    m_rg_fan_valid = false;
+    m_rg_miss = 0;
     m_callback = nullptr;
     m_state.power = false;
     m_state.mode = FAIKIN_MODE_AUTO;
@@ -246,6 +250,9 @@ esp_err_t DaikinS21::SendPacket(uint8_t cmd1, uint8_t cmd2, uint8_t *payload, in
             else if (rx_buf[1] == 'S' && rx_buf[2] == 'H') {
                  ParseSensorsSH(&rx_buf[3], rx_idx - 5);
             }
+            else if (rx_buf[1] == 'S' && rx_buf[2] == 'G') {   // RG -> fan setting
+                 ParseFanSG(&rx_buf[3], rx_idx - 5);
+            }
             else if (rx_buf[1] == 'G' && rx_buf[2] == '6') {
                  ParseSettingsG6(&rx_buf[3], rx_idx - 5);
             }
@@ -277,6 +284,15 @@ void DaikinS21::ParseStatusG1(uint8_t *payload, int len) {
     
     bool pwr = (payload[0] == '1');
     float t = s21_decode_target_temp(payload[2]);
+    bool just_confirmed = false;
+
+    // RG is more reliable, so G1's fan byte is only the fallback. Some units report Quiet
+    // as Auto here, so don't let that undo Quiet.
+    uint8_t raw_fan = payload[3];
+    if (!m_rg_fan_valid && raw_fan && strchr("34567AB", raw_fan) &&
+        !(raw_fan == AC_FAN_AUTO && m_state.fan_speed == FAIKIN_FAN_QUIET)) {
+        UpdateFanFromAC(s21_decode_fan(raw_fan));
+    }
 
     // A newer command is waiting to be sent, so this status is already out of date.
     if (m_dirty) return;
@@ -289,6 +305,9 @@ void DaikinS21::ParseStatusG1(uint8_t *payload, int len) {
                           (!has_setpoint || payload[2] == (uint8_t)s21_encode_target_temp(m_state.target_temp)));
         if (confirmed) {
             m_d1_confirm_until = 0;
+            // Nothing below looks changed because the command already updated m_state, but
+            // related attributes (on/off and system mode) still need to be brought in line.
+            just_confirmed = true;
         } else if (esp_timer_get_time() < m_d1_confirm_until) {
             return;
         } else {
@@ -308,7 +327,35 @@ void DaikinS21::ParseStatusG1(uint8_t *payload, int len) {
     m_state.mode = mode;
     m_state.target_temp = t;
 
-    if (changed && m_callback) m_callback(&m_state);
+    if ((changed || just_confirmed) && m_callback) m_callback(&m_state);
+}
+
+void DaikinS21::ParseFanSG(uint8_t *payload, int len) {
+    if (len < 1 || !payload[0] || !strchr("34567AB", payload[0])) {
+        m_rg_fan_valid = false;
+        return;
+    }
+    m_rg_fan_valid = true;
+    UpdateFanFromAC(s21_decode_fan(payload[0]));
+}
+
+void DaikinS21::UpdateFanFromAC(uint8_t fan) {
+    // Same as ParseStatusG1: don't let an out-of-date status undo a command.
+    if (m_dirty) return;
+    if (m_fan_confirm_until) {
+        if (fan == m_state.fan_speed) {
+            m_fan_confirm_until = 0;
+        } else if (esp_timer_get_time() < m_fan_confirm_until) {
+            return;
+        } else {
+            m_fan_confirm_until = 0;
+        }
+    }
+    if (m_state.fan_speed != fan) {
+        ESP_LOGI(TAG, "Fan speed from AC: %u", fan);
+        m_state.fan_speed = fan;
+        if (m_callback) m_callback(&m_state);
+    }
 }
 
 void DaikinS21::ParseSettingsG6(uint8_t *payload, int len) {
@@ -428,10 +475,10 @@ void DaikinS21::SendControlD1() {
     else
         payload[2] = (uint8_t)s21_encode_target_temp(m_state.target_temp);
 
-    if (m_state.fan_speed == FAIKIN_FAN_AUTO) payload[3] = 'A'; 
-    else payload[3] = '3' + (m_state.fan_speed - 1); 
+    payload[3] = s21_encode_fan(m_state.fan_speed);
     SendPacket('D', '1', payload, 4);
     m_d1_confirm_until = esp_timer_get_time() + S21_CONFIRM_TIMEOUT_US;
+    m_fan_confirm_until = m_d1_confirm_until;
 }
 
 void DaikinS21::Poll() {
@@ -460,6 +507,18 @@ void DaikinS21::Poll() {
     
     // Poll Sensor (RH -> SH)
     SendPacket('R', 'H', NULL, 0);
+
+    // Poll the fan setting (RG -> SG). Not every unit answers; G1 is the fallback.
+    if (m_rg_supported) {
+        vTaskDelay(pdMS_TO_TICKS(300));
+        if (SendPacket('R', 'G', NULL, 0) == ESP_OK) {
+            m_rg_miss = 0;
+        } else if (++m_rg_miss >= 3) {
+            m_rg_supported = false;
+            m_rg_fan_valid = false;
+            ESP_LOGW(TAG, "AC does not answer RG; reading the fan setting from G1");
+        }
+    }
 
     // Poll energy meters (S21 FX60 power, FM total Wh, FU04 cool/heat Wh).
     // Many units don't support these; if the unit ignores/NAKs them for a few

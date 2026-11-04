@@ -40,11 +40,14 @@ static DaikinX50A s_x50a;        // X50A protocol backend (experimental/unverifi
 static DaikinCNWired s_cnwired;  // CN_WIRED protocol backend (experimental/unverified)
 static ACManager s21;            // multi-protocol manager (keeps the 's21' name used throughout this file)
 
+// Fan slider scale: 0% is Quiet, 1-99% steps through levels 1 to 5, and 100% is Auto.
+// Apple Home only offers the slider, so Quiet and Auto sit at its two ends.
+// Matter ties 0% to FanMode Off, so Off means Quiet here. The fan never actually stops.
 static uint8_t s21_fan_to_matter(uint8_t s21_fan)
 {
     switch (s21_fan) {
         case FAIKIN_FAN_AUTO:  return 5; // Auto
-        case FAIKIN_FAN_QUIET:
+        case FAIKIN_FAN_QUIET: return 0; // Off
         case FAIKIN_FAN_1:
         case FAIKIN_FAN_2:     return 1; // Low
         case FAIKIN_FAN_3:     return 2; // Medium
@@ -57,35 +60,42 @@ static uint8_t s21_fan_to_matter(uint8_t s21_fan)
 static uint8_t matter_fan_to_s21(uint8_t matter_fan)
 {
     switch (matter_fan) {
+        case 0: return FAIKIN_FAN_QUIET; // Off
         case 1: return FAIKIN_FAN_1; // Low
         case 2: return FAIKIN_FAN_3; // Medium
         case 3: return FAIKIN_FAN_5; // High
-        default: return FAIKIN_FAN_AUTO; // Off / On / Auto / Smart
+        default: return FAIKIN_FAN_AUTO; // On / Auto / Smart
     }
 }
 
+// Each value must map back to the same speed through percent_to_s21_fan().
 static uint8_t s21_fan_to_percent(uint8_t s21_fan)
 {
     switch (s21_fan) {
-        case FAIKIN_FAN_QUIET:
+        case FAIKIN_FAN_QUIET: return 0;
         case FAIKIN_FAN_1: return 20;
         case FAIKIN_FAN_2: return 40;
         case FAIKIN_FAN_3: return 60;
         case FAIKIN_FAN_4: return 80;
-        case FAIKIN_FAN_5: return 100;
-        default:           return 0;
+        case FAIKIN_FAN_5: return 99;
+        default:           return 100;
     }
 }
 
 static uint8_t percent_to_s21_fan(uint8_t percent)
 {
-    if (percent == 0)  return FAIKIN_FAN_AUTO;
-    if (percent <= 20) return FAIKIN_FAN_1;
-    if (percent <= 40) return FAIKIN_FAN_2;
-    if (percent <= 60) return FAIKIN_FAN_3;
-    if (percent <= 80) return FAIKIN_FAN_4;
+    if (percent == 0)   return FAIKIN_FAN_QUIET;
+    if (percent >= 100) return FAIKIN_FAN_AUTO;
+    if (percent <= 20)  return FAIKIN_FAN_1;
+    if (percent <= 40)  return FAIKIN_FAN_2;
+    if (percent <= 60)  return FAIKIN_FAN_3;
+    if (percent <= 80)  return FAIKIN_FAN_4;
     return FAIKIN_FAN_5;
 }
+
+// True while AppDriverUpdateTask reports the fan state. Matter's fan logic reacts to those
+// reports by writing the fan attributes back, and those writes aren't user commands.
+static bool s_reporting_fan = false;
 
 // Global Temperature Storage
 int16_t g_current_temp_int = 2100; 
@@ -167,6 +177,7 @@ static void AppDriverUpdateTask(intptr_t context)
     esp_matter::attribute::report(ac_endpoint_id, Thermostat::Id, Thermostat::Attributes::ThermostatRunningState::Id, &val);
 
     // Fan Control — mirror Daikin fan speed into Matter.
+    s_reporting_fan = true;
     val = esp_matter_enum8(s21_fan_to_matter(data->state.fan_speed));
     esp_matter::attribute::report(ac_endpoint_id, FanControl::Id, FanControl::Attributes::FanMode::Id, &val);
 
@@ -175,6 +186,7 @@ static void AppDriverUpdateTask(intptr_t context)
     esp_matter::attribute::report(ac_endpoint_id, FanControl::Id, FanControl::Attributes::PercentSetting::Id, &val);
     val = esp_matter_uint8(pct);
     esp_matter::attribute::report(ac_endpoint_id, FanControl::Id, FanControl::Attributes::PercentCurrent::Id, &val);
+    s_reporting_fan = false;
 
     if (powerful_endpoint_id != 0) {
         val = esp_matter_bool(data->state.powerful);
@@ -248,6 +260,9 @@ static esp_err_t app_driver_on_off_set_value(esp_matter_attr_val_t *val, uint32_
 
 static esp_err_t app_driver_fan_set_value(esp_matter_attr_val_t *val, uint32_t attribute_id)
 {
+    if (s_reporting_fan) {
+        return ESP_OK;
+    }
     if (attribute_id == FanControl::Attributes::FanMode::Id) {
         uint8_t s21_fan = matter_fan_to_s21(val->val.u8);
         ESP_LOGI(TAG, "FanMode write %u → s21 %u", val->val.u8, s21_fan);

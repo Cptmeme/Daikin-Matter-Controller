@@ -54,7 +54,7 @@ Open source Matter firmware for Daikin split air conditioners with an S21 port. 
 - ✅ Multi-fabric — commission to multiple hubs simultaneously
 - ✅ Native Room Air Conditioner tile (single accessory in your home app)
 - ✅ Power, Mode (Heat/Cool/Auto/Off), Setpoint, Current Temperature
-- ✅ Fan speed (Low/Med/High/Auto + percent slider)
+- ✅ Fan speed (Quiet, levels 1 to 5, and Auto on a percent slider)
 - ✅ Powerful mode as a separate switchable endpoint
 - ✅ Live power draw (W) + lifetime energy (kWh) on S21 units that report it — surfaced via Matter Electrical Power/Energy Measurement clusters (Home Assistant displays them and can feed its Energy dashboard)
 - ✅ Two-way state sync — adjusting on the Daikin remote updates your home app within about 5 seconds
@@ -63,7 +63,7 @@ Open source Matter firmware for Daikin split air conditioners with an S21 port. 
 
 > **Fan speed visibility note:** Apple Home on iOS 27.2 shows the fan slider in the AC's device settings, not on the tile. It may have appeared as early as iOS 27.0, but that's unconfirmed, and older versions don't show it. Google Home on iOS doesn't show it either. Home Assistant does. A missing slider is a controller-side UI limitation, not a firmware bug — the FanControl cluster is correctly registered and writable from any Matter controller that chooses to surface it.
 >
-> **Setting the slider to 0 selects the AC's Auto fan speed.** This is deliberate, because Apple Home has no separate option for Auto.
+> **Fan slider scale:** 0 is Quiet, 1–99 steps through levels 1 to 5 (a new level about every 20%), and 100 is Auto. Apple Home has no separate options for Quiet and Auto, so they sit at the two ends of the slider. A controller that shows fan modes may label Quiet as Off, because Matter treats 0% as Off, but the fan doesn't stop.
 
 ---
 

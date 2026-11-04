@@ -36,6 +36,10 @@ private:
     bool m_powerful_dirty;
     int64_t m_d1_confirm_until;   // esp_timer time to stop waiting for D1 to show up in G1; 0 = not waiting
     int64_t m_d6_confirm_until;   // same for D6 and G6
+    int64_t m_fan_confirm_until;  // same for the fan setting in D1
+    bool m_rg_supported;          // set false if the unit doesn't answer RG
+    bool m_rg_fan_valid;          // RG gives a usable fan setting, so ignore G1's
+    int m_rg_miss;                // consecutive RG polls with no answer
     s21_state_change_cb_t m_callback;
     bool m_energy_supported;   // set false if the unit NAKs the energy queries
     int m_energy_miss;         // consecutive cycles with no energy response
@@ -44,6 +48,8 @@ private:
     esp_err_t SendPacket(uint8_t cmd1, uint8_t cmd2, uint8_t *payload, int len);
     void ParseStatusG1(uint8_t *payload, int len);
     void ParseSettingsG6(uint8_t *payload, int len);
+    void ParseFanSG(uint8_t *payload, int len);     // RG -> fan setting
+    void UpdateFanFromAC(uint8_t fan);
     void ParseSensorsGH(uint8_t *payload, int len);
     void ParseSensorsG9(uint8_t *payload, int len);
     void ParseSensorsSH(uint8_t *payload, int len);
