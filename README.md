@@ -87,10 +87,10 @@ Open source Matter firmware for Daikin split air conditioners with an S21 port. 
 
 You need *something* between the ESP32-C6 and the Daikin's S21 port — the S21 bus is 5V logic and the ESP32 is 3.3V. A standard bidirectional level shifter (e.g. BSS138-based, like Adafruit / SparkFun "logic level converter" boards) works fine for the data lines if wired correctly; that's the same approach the included PCB uses. The reason for recommending a known-good board over breadboarding is more about getting the power supply, connectors, and protection right than about the level shifting being especially tricky.
 
-> ⚠️ **Important — the included PCB inverts the S21 signals in hardware, and the firmware is written to match.** The bit-bang routines in [`main/s21_driver.cpp`](Thermostat_Daikin/main/s21_driver.cpp) intentionally output and sample *inverted* logic levels (see `gpio_set_level(... bit ? 0 : 1)` at line 27 for TX and `if (level == 0) byte |= ...` at line 50 for RX). If you wire up a generic *non-inverting* level shifter, the AC will receive the wrong polarity and communication will silently fail. You then have two choices:
+> ⚠️ **Important — the included PCB inverts the S21 signals in hardware, and the firmware is written to match.** The S21 UART in [`main/s21_driver.cpp`](Thermostat_Daikin/main/s21_driver.cpp) runs with both lines inverted (see `uart_set_line_inverse` in `s21_line_init`). If you wire up a generic *non-inverting* level shifter, the AC will receive the wrong polarity and communication will silently fail. You then have two choices:
 >
 > - **Add a hardware inverter** in series with each S21 line (single transistor or a hex inverter IC like 74HC04), or
-> - **Edit the firmware** to remove the inversion — flip the four `bit ? 0 : 1` / `parity ? 0 : 1` writes and the `level == 0` read in [`main/s21_driver.cpp`](Thermostat_Daikin/main/s21_driver.cpp).
+> - **Edit the firmware** to remove the inversion — delete the `uart_set_line_inverse` call in [`main/s21_driver.cpp`](Thermostat_Daikin/main/s21_driver.cpp).
 >
 > If you're using the included PCB, a Faikout, or any other interface that expects inverted-polarity drive, leave the firmware alone — it's already correct.
 >

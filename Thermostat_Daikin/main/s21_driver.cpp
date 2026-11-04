@@ -1,5 +1,6 @@
 #include "s21_driver.h"
 #include <driver/gpio.h>
+#include <driver/uart.h>
 #include <esp_log.h>
 #include <string.h>
 #include <math.h>
@@ -8,12 +9,70 @@
 #include <esp_timer.h>
 
 static const char *TAG = "S21_DRIVER";
-#define BIT_DELAY_US 417 
 #define BUF_SIZE 256
+
+// How long a status that disagrees with a command we just sent is ignored.
+#define S21_CONFIRM_TIMEOUT_US (15 * 1000000LL)
+
+// 1 = hardware UART, 0 = the older bit-banged software UART. Keep the bit-banged
+// version until the UART has proven itself on real units.
+#ifndef S21_USE_UART
+#define S21_USE_UART 1
+#endif
 
 static bool s_connected = false;
 static int s_tx_pin = 0;
 static int s_rx_pin = 0;
+
+#if S21_USE_UART
+
+#define S21_UART_NUM UART_NUM_1
+
+static esp_err_t s21_line_init() {
+    gpio_reset_pin((gpio_num_t)s_tx_pin);
+    gpio_reset_pin((gpio_num_t)s_rx_pin);
+
+    uart_config_t cfg = {};
+    cfg.baud_rate = 2400;
+    cfg.data_bits = UART_DATA_8_BITS;
+    cfg.parity = UART_PARITY_EVEN;
+    cfg.stop_bits = UART_STOP_BITS_2;
+    cfg.flow_ctrl = UART_HW_FLOWCTRL_DISABLE;
+    cfg.source_clk = UART_SCLK_DEFAULT;
+
+    esp_err_t err = uart_param_config(S21_UART_NUM, &cfg);
+    // The interface board inverts both lines. Set this before the pins are connected,
+    // so TX doesn't idle at the wrong level and send the AC a false start bit.
+    if (!err) err = uart_set_line_inverse(S21_UART_NUM, UART_SIGNAL_RXD_INV | UART_SIGNAL_TXD_INV);
+    if (!err) err = uart_set_pin(S21_UART_NUM, s_tx_pin, s_rx_pin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    // The RX FET only pulls low, so the pin needs a pull-up for the high level.
+    if (!err) err = gpio_pullup_en((gpio_num_t)s_rx_pin);
+    if (!err && !uart_is_driver_installed(S21_UART_NUM)) err = uart_driver_install(S21_UART_NUM, 1024, 0, 0, NULL, 0);
+    if (!err) err = uart_set_rx_full_threshold(S21_UART_NUM, 1);
+    return err;
+}
+
+static void s21_line_deinit() {
+    if (uart_is_driver_installed(S21_UART_NUM)) uart_driver_delete(S21_UART_NUM);
+}
+
+static void s21_line_flush_rx() {
+    uart_flush_input(S21_UART_NUM);
+}
+
+static void s21_line_write(const uint8_t *data, int len) {
+    uart_write_bytes(S21_UART_NUM, data, len);
+    uart_wait_tx_done(S21_UART_NUM, pdMS_TO_TICKS(200));
+}
+
+static int s21_line_read(uint32_t timeout_ms) {
+    uint8_t byte;
+    return uart_read_bytes(S21_UART_NUM, &byte, 1, pdMS_TO_TICKS(timeout_ms)) == 1 ? byte : -1;
+}
+
+#else // !S21_USE_UART
+
+#define BIT_DELAY_US 417
 static portMUX_TYPE s_spinlock = portMUX_INITIALIZER_UNLOCKED;
 
 static void sw_write_byte(uint8_t byte) {
@@ -50,13 +109,44 @@ static int sw_read_byte(uint32_t timeout_ms) {
         if (level == 0) byte |= (1 << i); 
         esp_rom_delay_us(BIT_DELAY_US);
     }
-    esp_rom_delay_us(BIT_DELAY_US * 2); 
+    esp_rom_delay_us(BIT_DELAY_US * 2);
     return byte;
 }
+
+static esp_err_t s21_line_init() {
+    gpio_config_t tx_conf = {};
+    tx_conf.pin_bit_mask = (1ULL << s_tx_pin);
+    tx_conf.mode = GPIO_MODE_OUTPUT;
+    tx_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+    esp_err_t err = gpio_config(&tx_conf);
+    if (!err) err = gpio_set_level((gpio_num_t)s_tx_pin, 0);
+    gpio_config_t rx_conf = {};
+    rx_conf.pin_bit_mask = (1ULL << s_rx_pin);
+    rx_conf.mode = GPIO_MODE_INPUT;
+    rx_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+    if (!err) err = gpio_config(&rx_conf);
+    return err;
+}
+
+static void s21_line_deinit() {}
+
+static void s21_line_flush_rx() {}
+
+static void s21_line_write(const uint8_t *data, int len) {
+    for (int i = 0; i < len; i++) sw_write_byte(data[i]);
+}
+
+static int s21_line_read(uint32_t timeout_ms) {
+    return sw_read_byte(timeout_ms);
+}
+
+#endif // S21_USE_UART
 
 DaikinS21::DaikinS21() {
     m_dirty = false;
     m_powerful_dirty = false;
+    m_d1_confirm_until = 0;
+    m_d6_confirm_until = 0;
     m_callback = nullptr;
     m_state.power = false;
     m_state.mode = FAIKIN_MODE_AUTO;
@@ -79,6 +169,7 @@ bool DaikinS21::IsConnected() const {
 void DaikinS21::Deinit() {
     // Release the pins so another backend can probe them; force a fresh detect.
     s_connected = false;
+    s21_line_deinit();
     gpio_config_t in = {};
     in.pin_bit_mask = (1ULL << s_tx_pin) | (1ULL << s_rx_pin);
     in.mode = GPIO_MODE_INPUT;
@@ -97,34 +188,26 @@ bool DaikinS21::Detect() {
 esp_err_t DaikinS21::Init(int tx_pin, int rx_pin) {
     s_tx_pin = tx_pin;
     s_rx_pin = rx_pin;
-    gpio_config_t tx_conf = {};
-    tx_conf.pin_bit_mask = (1ULL << tx_pin);
-    tx_conf.mode = GPIO_MODE_OUTPUT;
-    tx_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-    ESP_ERROR_CHECK(gpio_config(&tx_conf));
-    gpio_set_level((gpio_num_t)tx_pin, 0); 
-    gpio_config_t rx_conf = {};
-    rx_conf.pin_bit_mask = (1ULL << rx_pin);
-    rx_conf.mode = GPIO_MODE_INPUT;
-    rx_conf.pull_up_en = GPIO_PULLUP_ENABLE;
-    ESP_ERROR_CHECK(gpio_config(&rx_conf));
-    vTaskDelay(pdMS_TO_TICKS(2000)); 
+    esp_err_t err = s21_line_init();
+    if (err) {
+        ESP_LOGE(TAG, "S21 line init failed: %s", esp_err_to_name(err));
+        return err;
+    }
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    s21_line_flush_rx();
     return ESP_OK;
 }
 
 esp_err_t DaikinS21::SendPacket(uint8_t cmd1, uint8_t cmd2, uint8_t *payload, int len) {
-    sw_write_byte(STX);
-    sw_write_byte(cmd1);
-    sw_write_byte(cmd2);
     uint8_t buf[64];
     buf[0] = STX; buf[1] = cmd1; buf[2] = cmd2;
     if (len > 0) memcpy(&buf[3], payload, len);
-    for(int i=0; i<len; i++) sw_write_byte(payload[i]);
-    uint8_t crc = s21_checksum(buf, len + 3 + 2); 
-    sw_write_byte(crc);
-    sw_write_byte(ETX);
+    buf[len + 3] = s21_checksum(buf, len + 3 + 2);
+    buf[len + 4] = ETX;
+    s21_line_flush_rx();
+    s21_line_write(buf, len + 5);
 
-    int ack = sw_read_byte(800);
+    int ack = s21_line_read(800);
     if (ack == -1) return ESP_ERR_TIMEOUT;
     if (ack == NAK) return ESP_FAIL;
 
@@ -132,12 +215,12 @@ esp_err_t DaikinS21::SendPacket(uint8_t cmd1, uint8_t cmd2, uint8_t *payload, in
     int rx_idx = 0;
     if (ack == STX) rx_buf[rx_idx++] = STX;
     else if (ack == ACK) {
-        int val = sw_read_byte(500);
+        int val = s21_line_read(500);
         if (val == STX) rx_buf[rx_idx++] = STX;
         else return ESP_OK; 
     }
     while (rx_idx < BUF_SIZE) {
-        int val = sw_read_byte(100);
+        int val = s21_line_read(100);
         if (val == -1) break;
         rx_buf[rx_idx++] = (uint8_t)val;
         if (val == ETX) break;
@@ -146,7 +229,8 @@ esp_err_t DaikinS21::SendPacket(uint8_t cmd1, uint8_t cmd2, uint8_t *payload, in
     if (rx_idx > 3 && rx_buf[rx_idx-1] == ETX) {
         uint8_t calc_crc = s21_checksum(rx_buf, rx_idx);
         if (calc_crc == rx_buf[rx_idx-2]) {
-            sw_write_byte(ACK);
+            const uint8_t ack_byte = ACK;
+            s21_line_write(&ack_byte, 1);
             s_connected = true;
             
             // DEBUG DUMP (Keep this to verify mode byte)
@@ -194,6 +278,25 @@ void DaikinS21::ParseStatusG1(uint8_t *payload, int len) {
     bool pwr = (payload[0] == '1');
     float t = s21_decode_target_temp(payload[2]);
 
+    // A newer command is waiting to be sent, so this status is already out of date.
+    if (m_dirty) return;
+
+    // The AC can keep reporting the old values for a while after a command, for example
+    // during a heat/cool change. Keep what was commanded until it confirms or time runs out.
+    if (m_d1_confirm_until) {
+        bool has_setpoint = (m_state.mode != FAIKIN_MODE_FAN && m_state.mode != FAIKIN_MODE_DRY);
+        bool confirmed = (pwr == m_state.power && mode == m_state.mode &&
+                          (!has_setpoint || payload[2] == (uint8_t)s21_encode_target_temp(m_state.target_temp)));
+        if (confirmed) {
+            m_d1_confirm_until = 0;
+        } else if (esp_timer_get_time() < m_d1_confirm_until) {
+            return;
+        } else {
+            m_d1_confirm_until = 0;
+            ESP_LOGW(TAG, "AC did not confirm the last command, using the state it reports");
+        }
+    }
+
     // Check if something changed
     bool changed = (m_state.power != pwr || m_state.mode != mode || m_state.target_temp != t);
     
@@ -213,7 +316,20 @@ void DaikinS21::ParseSettingsG6(uint8_t *payload, int len) {
     
     // Check the powerful bit (0x02) on the first payload byte
     bool pow = (payload[0] & S21_FLAG_POWERFUL) != 0;
-    
+
+    // Same as ParseStatusG1: don't let an out-of-date status undo a command.
+    if (m_powerful_dirty) return;
+    if (m_d6_confirm_until) {
+        if (pow == m_state.powerful) {
+            m_d6_confirm_until = 0;
+        } else if (esp_timer_get_time() < m_d6_confirm_until) {
+            return;
+        } else {
+            m_d6_confirm_until = 0;
+        }
+    }
+
+
     if (m_state.powerful != pow) {
         ESP_LOGI(TAG, "Powerful Mode Change Detected! Powerful:%d", pow);
         m_state.powerful = pow;
@@ -223,7 +339,10 @@ void DaikinS21::ParseSettingsG6(uint8_t *payload, int len) {
 
 void DaikinS21::SendControlD6() {
     uint8_t payload[4];
-    
+
+    // Clear this first: a new command can arrive while SendPacket waits for the reply.
+    m_powerful_dirty = false;
+
     // Byte 0: Base '0' + Powerful (0x02) + Comfort (0x40) + Quiet (0x80)
     payload[0] = S21_D6_BASE_BYTE;
     if (m_state.powerful) payload[0] += S21_FLAG_POWERFUL;
@@ -234,9 +353,7 @@ void DaikinS21::SendControlD6() {
     payload[3] = S21_D6_BASE_BYTE;
 
     SendPacket('D', '6', payload, 4);
-    
-    // Clear the dirty flag specific to the powerful state
-    m_powerful_dirty = false; 
+    m_d6_confirm_until = esp_timer_get_time() + S21_CONFIRM_TIMEOUT_US;
 }
 
 void DaikinS21::ParseSensorsSH(uint8_t *payload, int len) {
@@ -294,6 +411,10 @@ void DaikinS21::ParseEnergyGU(uint8_t *payload, int len) {
 
 void DaikinS21::SendControlD1() {
     uint8_t payload[4];
+
+    // Clear this first: a new command can arrive while SendPacket waits for the reply.
+    m_dirty = false;
+
     payload[0] = m_state.power ? '1' : '0';
     switch(m_state.mode) {
         case FAIKIN_MODE_COOL: payload[1] = 0x33; break;
@@ -310,7 +431,7 @@ void DaikinS21::SendControlD1() {
     if (m_state.fan_speed == FAIKIN_FAN_AUTO) payload[3] = 'A'; 
     else payload[3] = '3' + (m_state.fan_speed - 1); 
     SendPacket('D', '1', payload, 4);
-    m_dirty = false;
+    m_d1_confirm_until = esp_timer_get_time() + S21_CONFIRM_TIMEOUT_US;
 }
 
 void DaikinS21::Poll() {
@@ -366,7 +487,8 @@ void DaikinS21::Poll() {
 void DaikinS21::SetPower(bool on) { if(m_state.power != on) { m_state.power = on; m_dirty = true; } }
 void DaikinS21::SetMode(uint8_t mode) { if(m_state.mode != mode) { m_state.mode = mode; m_dirty = true; } }
 void DaikinS21::SetTemp(float temp) { if(fabs(m_state.target_temp - temp) > 0.1) { m_state.target_temp = temp; m_dirty = true; } }
-void DaikinS21::SetFan(uint8_t fan) { m_state.fan_speed = fan; m_dirty = true; }
+// Only mark a change: reporting the fan state to Matter calls this again with the same value.
+void DaikinS21::SetFan(uint8_t fan) { if(m_state.fan_speed != fan) { m_state.fan_speed = fan; m_dirty = true; } }
 // SetStateCallback is defined inline in s21_driver.h
 void DaikinS21::SetPowerful(bool on) {
     if(m_state.powerful != on) { 

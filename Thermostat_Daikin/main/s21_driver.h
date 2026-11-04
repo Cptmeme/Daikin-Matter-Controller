@@ -7,8 +7,8 @@
 #include "ac_state.h"
 #include "ac_backend.h"
 
-// Daikin S21 protocol backend: bit-banged software UART, 2400 baud 8E2,
-// inverted through the BSS138 level shifters. See s21_driver.cpp.
+// Daikin S21 protocol backend: UART at 2400 baud 8E2, inverted through the
+// BSS138 level shifters. See S21_USE_UART in s21_driver.cpp.
 class DaikinS21 : public ACBackend {
 public:
     DaikinS21();
@@ -34,6 +34,8 @@ private:
     ac_state_t m_state;
     bool m_dirty;
     bool m_powerful_dirty;
+    int64_t m_d1_confirm_until;   // esp_timer time to stop waiting for D1 to show up in G1; 0 = not waiting
+    int64_t m_d6_confirm_until;   // same for D6 and G6
     s21_state_change_cb_t m_callback;
     bool m_energy_supported;   // set false if the unit NAKs the energy queries
     int m_energy_miss;         // consecutive cycles with no energy response
