@@ -309,13 +309,33 @@ app_driver_handle_t app_driver_thermostat_init()
     return (app_driver_handle_t)1;
 }
 
-static void app_driver_button_toggle_cb(void *arg, void *data)
+// Runs on the CHIP thread, because the commissioning window needs the CHIP stack lock.
+static void app_driver_open_commissioning_window(intptr_t)
 {
-    ESP_LOGI(TAG, "Button Pressed: Opening Commissioning Window");
-    chip::CommissioningWindowManager & commissionMgr = chip::Server::GetInstance().GetCommissioningWindowManager();
-    if (!commissionMgr.IsCommissioningWindowOpen()) {
-        commissionMgr.OpenBasicCommissioningWindow(chip::System::Clock::Seconds16(300),
-                                                   chip::CommissioningWindowAdvertisement::kDnssdOnly);
+    chip::Server & server = chip::Server::GetInstance();
+    if (server.GetFabricTable().FabricCount() != 0) {
+        ESP_LOGI(TAG, "Button: device is commissioned, not opening a commissioning window");
+        return;
+    }
+    chip::CommissioningWindowManager & commissionMgr = server.GetCommissioningWindowManager();
+    if (commissionMgr.IsCommissioningWindowOpen()) {
+        return;
+    }
+    // With no fabric the device may not be on a network yet, so advertise over BLE too.
+    CHIP_ERROR err = commissionMgr.OpenBasicCommissioningWindow(chip::System::Clock::Seconds16(300),
+                                                                chip::CommissioningWindowAdvertisement::kAllSupported);
+    if (err != CHIP_NO_ERROR) {
+        ESP_LOGE(TAG, "Failed to open commissioning window, err:%" CHIP_ERROR_FORMAT, err.Format());
+        return;
+    }
+    ESP_LOGI(TAG, "Button: commissioning window opened for 5 minutes");
+}
+
+// Called from the button library's timer task, not the CHIP thread.
+static void app_driver_button_click_cb(void *arg, void *data)
+{
+    if (esp_matter::is_started()) {
+        chip::DeviceLayer::PlatformMgr().ScheduleWork(app_driver_open_commissioning_window, 0);
     }
 }
 
@@ -326,7 +346,8 @@ app_driver_handle_t app_driver_button_init()
     button_handle_t btn_handle = NULL;
     esp_err_t err = iot_button_new_gpio_device(&btn_cfg, &btn_gpio_cfg, &btn_handle);
     if (err == ESP_OK && btn_handle) {
-        iot_button_register_cb(btn_handle, BUTTON_PRESS_DOWN, NULL, app_driver_button_toggle_cb, NULL);
+        // A single click is a press shorter than the long press, so a factory reset never triggers it.
+        iot_button_register_cb(btn_handle, BUTTON_SINGLE_CLICK, NULL, app_driver_button_click_cb, NULL);
         return (app_driver_handle_t)btn_handle;
     }
     return NULL;

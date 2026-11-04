@@ -1,0 +1,12 @@
+# ESP-IDF build output and generated files
+build/
+managed_components/
+sdkconfig
+sdkconfig.old
+
+# Editor and OS files
+.vscode/
+.DS_Store
+
+# KiCad backups
+*-backups/

@@ -25,9 +25,9 @@ if(NOT DEFINED ENV{ESP_MATTER_DEVICE_PATH})
 endif(NOT DEFINED ENV{ESP_MATTER_DEVICE_PATH})
 
 # Firmware version. Bump both for every OTA release, together with
-# CONFIG_DEVICE_SOFTWARE_VERSION_NUMBER in sdkconfig (checked below).
-set(PROJECT_VER "1.1")
-set(PROJECT_VER_NUMBER 2)
+# CONFIG_DEVICE_SOFTWARE_VERSION_NUMBER in sdkconfig.defaults (checked below).
+set(PROJECT_VER "1.2")
+set(PROJECT_VER_NUMBER 3)
 
 set(ESP_MATTER_PATH $ENV{ESP_MATTER_PATH})
 set(MATTER_SDK_PATH ${ESP_MATTER_PATH}/connectedhomeip/connectedhomeip)
@@ -51,7 +51,8 @@ project(thermostat)
 # re-downloaded forever or reported as failed.
 if(NOT CONFIG_DEVICE_SOFTWARE_VERSION_NUMBER EQUAL PROJECT_VER_NUMBER)
     message(FATAL_ERROR "CONFIG_DEVICE_SOFTWARE_VERSION_NUMBER (${CONFIG_DEVICE_SOFTWARE_VERSION_NUMBER}) "
-                        "must equal PROJECT_VER_NUMBER (${PROJECT_VER_NUMBER})")
+                        "must equal PROJECT_VER_NUMBER (${PROJECT_VER_NUMBER}). It is set in sdkconfig.defaults, "
+                        "but an existing sdkconfig takes priority: change it there too, or delete sdkconfig to regenerate it.")
 endif()
 
 # WARNING: This is just an example for using key for decrypting the encrypted OTA image

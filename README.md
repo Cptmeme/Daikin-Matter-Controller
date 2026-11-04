@@ -57,11 +57,13 @@ Open source Matter firmware for Daikin split air conditioners with an S21 port. 
 - ✅ Fan speed (Low/Med/High/Auto + percent slider)
 - ✅ Powerful mode as a separate switchable endpoint
 - ✅ Live power draw (W) + lifetime energy (kWh) on S21 units that report it — surfaced via Matter Electrical Power/Energy Measurement clusters (Home Assistant displays them and can feed its Energy dashboard)
-- ✅ Two-way state sync — adjusting on the Daikin remote updates your home app within ~2 seconds
+- ✅ Two-way state sync — adjusting on the Daikin remote updates your home app within about 5 seconds
 - ✅ Factory reset via long press on the onboard button
 - ✅ OTA-ready — dual OTA partitions with bootloader app-rollback for safe over-the-air updates (via a Matter OTA provider)
 
-> **Fan speed visibility note:** Apple Home and Google Home (on IOS) currently *do not render* the fan slider on their AC tile, even when the firmware correctly advertises it. Home Assistant shows it. This is a controller-side UI limitation, not a firmware bug — the FanControl cluster is correctly registered and writable from any Matter controller that chooses to surface it.
+> **Fan speed visibility note:** Apple Home on iOS 27.2 shows the fan slider in the AC's device settings, not on the tile. It may have appeared as early as iOS 27.0, but that's unconfirmed, and older versions don't show it. Google Home on iOS doesn't show it either. Home Assistant does. A missing slider is a controller-side UI limitation, not a firmware bug — the FanControl cluster is correctly registered and writable from any Matter controller that chooses to surface it.
+>
+> **Setting the slider to 0 selects the AC's Auto fan speed.** This is deliberate, because Apple Home has no separate option for Auto.
 
 ---
 
@@ -71,33 +73,19 @@ Open source Matter firmware for Daikin split air conditioners with an S21 port. 
 
 | Ecosystem | Tested |
 |-----------|--------|
-| Apple Home | ✅ (no fan speed control)*|
+| Apple Home | ✅ (fan speed in device settings on iOS 27.2)*|
 | Google Home | ✅ (no fan speed control on IOS)|
 | Alexa | Untested |
 | Home Assistant | ✅ |
 | SmartThings | Untested |
 
->*Fan speed can be controlled through the Eve app or automations in the home app
+>*On older iOS versions, fan speed can still be controlled through the Eve app or automations in the Home app
 ---
 ### Hardware
 
 **Recommended path: use a known-good interface board**
 
 You need *something* between the ESP32-C6 and the Daikin's S21 port — the S21 bus is 5V logic and the ESP32 is 3.3V. A standard bidirectional level shifter (e.g. BSS138-based, like Adafruit / SparkFun "logic level converter" boards) works fine for the data lines if wired correctly; that's the same approach the included PCB uses. The reason for recommending a known-good board over breadboarding is more about getting the power supply, connectors, and protection right than about the level shifting being especially tricky.
-
-> ⚠️ **Important — the included PCB inverts the S21 signals in hardware, and the firmware is written to match.** The bit-bang routines in `main/s21_driver.cpp` intentionally output and sample *inverted* logic levels (see `gpio_set_level(... bit ? 0 : 1)` at line 27 for TX and `if (level == 0) byte |= ...` at line 50 for RX). If you wire up a generic *non-inverting* level shifter, the AC will receive the wrong polarity and communication will silently fail. You then have two choices:
->
-> - **Add a hardware inverter** in series with each S21 line (single transistor or a hex inverter IC like 74HC04), or
-> - **Edit the firmware** to remove the inversion — flip the four `bit ? 0 : 1` / `parity ? 0 : 1` writes and the `level == 0` read in `main/s21_driver.cpp`.
->
-> If you're using the included PCB, a Faikout, or any other interface that expects inverted-polarity drive, leave the firmware alone — it's already correct.
-
-Two options that are known to work end-to-end:
-
-1. **The reference PCB included in this repo** — see the `Custom PCB esp32c6/` folder. KiCad project + BOM. Built around an WT0132C6-S5, a BSS138 for level shifting, and a JST EH 5-way for the S21 connection. **Thread + Wi-Fi capable** thanks to the C6's 802.15.4 radio. *Note: This board does not feature an onboard USB port. Flashing is done via exposed `RX0` and `TX0` headers using an external USB-to-Serial adapter, and the board is powered via a wide-input `V_in` pin (accepting 4V to 36V).*
-2. **A RevK ESP32-Faikout board.** This firmware's S21 implementation is derived from RevK's Faikout project and the Faikout hardware will work with it (you'll need to reflash with this firmware instead of Faikout's). 
-
-If you want to roll your own interface, use the included PCB as a reference rather than starting from scratch.
 
 > ⚠️ **Important — the included PCB inverts the S21 signals in hardware, and the firmware is written to match.** The bit-bang routines in [`main/s21_driver.cpp`](Thermostat_Daikin/main/s21_driver.cpp) intentionally output and sample *inverted* logic levels (see `gpio_set_level(... bit ? 0 : 1)` at line 27 for TX and `if (level == 0) byte |= ...` at line 50 for RX). If you wire up a generic *non-inverting* level shifter, the AC will receive the wrong polarity and communication will silently fail. You then have two choices:
 >
@@ -108,12 +96,12 @@ If you want to roll your own interface, use the included PCB as a reference rath
 >
 > The included PCB is derived from RevK's [Faikout](https://codeberg.org/RevK/ESP32-Faikout) hardware, which is where the inverted-signal convention comes from. For the deeper "why" — schematic excerpts, component choices, and the historical context for why S21 interfaces are typically built this way — see RevK's repos on [Codeberg](https://codeberg.org/RevK).
 
-Two options that are known to work end-to-end:
+Two interface options:
 
-1. **The reference PCB included in this repo** — see the [`Custom PCB esp32c6/`](Custom%20PCB%20esp32c6/) folder. KiCad project + BOM.
-2. **A RevK [ESP32-Faikout](https://codeberg.org/RevK/ESP32-Faikout) board.** This firmware's S21 implementation is derived from RevK's [Faikout]([https://codeberg.org/RevK/Faikin](https://codeberg.org/RevK/ESP32-Faikout)) project and the Faikout hardware will work with it (you'll need to reflash with this firmware instead of Faikout's). Faikout boards are sold by RevK and on Amazon UK — check the Faikout repo for current availability.
+1. **The reference PCB included in this repo, known to work end-to-end** — see the [`Custom PCB esp32c6/`](Custom%20PCB%20esp32c6/) folder. KiCad project + BOM. Built around a WT0132C6-S5, a BSS138 for level shifting, and a JST EH 5-way for the S21 connection. **Thread + Wi-Fi capable** thanks to the C6's 802.15.4 radio. *Note: This board does not feature an onboard USB port. Flashing is done via exposed `RX0` and `TX0` headers using an external USB-to-Serial adapter, and the board is powered via the `V_in` pin, which accepts **4.5V to 17V** (the limits of its TPS562246 regulator, whose absolute maximum is 19V). The 12-14V from S21 pin 4 is well within that.*
+2. **A RevK [ESP32-Faikout](https://codeberg.org/RevK/ESP32-Faikout) board.** This firmware's S21 implementation is derived from RevK's [Faikout](https://codeberg.org/RevK/ESP32-Faikout) project, and you'd reflash the board with this firmware instead of Faikout's. Faikout boards are sold by RevK and on Amazon UK — check the Faikout repo for current availability.
 
-> **⚠️ Faikout = Matter over Wi-Fi only (for now).** Current Faikout PCBs use ESP32 / ESP32-S3 chips, neither of which has an 802.15.4 radio. That means **if you flash this firmware onto a Faikout board, you will be running Matter over Wi-Fi, not Thread** — no Thread Border Router involvement. The firmware supports both transports, so it'll commission and work fine; you just lose Thread's mesh / low-power benefits. A future Faikout revision based on the ESP32-C6 (or similar) would change this — track the Faikout repo if that matters to you.
+> **⚠️ Faikout = Matter over Wi-Fi only, and untested on real hardware.** Current Faikout PCBs use ESP32 / ESP32-S3 chips, neither of which has an 802.15.4 radio, so this firmware runs Matter over Wi-Fi on them, with no Thread Border Router involvement. You lose Thread's mesh / low-power benefits. It builds for the ESP32-S3 (`idf.py set-target esp32s3`), but that build hasn't been run on a Faikout board. Before building, set the pins in [`main/app_driver.cpp`](Thermostat_Daikin/main/app_driver.cpp): Faikout's own defaults for the S3 are GPIO 48 for TX and GPIO 34 for RX, and `BUTTON_GPIO_PIN` needs changing because GPIO 23 doesn't exist on the S3. A future Faikout revision based on the ESP32-C6 (or similar) would change this — track the Faikout repo if that matters to you.
 
 If you want to roll your own interface, use the included PCB as a reference rather than starting from scratch.
 
@@ -131,7 +119,7 @@ Pinout, colors, and connector types are documented authoritatively in [Faikin's 
 
 > **Pin direction is from the aircon's perspective.** Pin 2 is the aircon's TX (data flowing *out* of the AC, *into* the ESP32). Pin 3 is the aircon's RX (data flowing *into* the AC, *from* the ESP32). The included PCB / Faikout handles the crossover correctly.
 
-> **Power comes from pin 4, not pin 1.** Pin 1's 5V rail does not supply enough current to run the ESP32-C6 + interface logic. The included PCB uses a [TI TPS562246](https://www.ti.com/product/TPS562246) synchronous step-down (buck) converter to take the 12-14V from pin 4 down to 3.3V for the ESP32. Faikout uses a similar wide-input regulator and accepts anywhere from 4V to 36V on pin 4. **Do not try to power the board from pin 1.**
+> **Power comes from pin 4, not pin 1.** Pin 1's 5V rail does not supply enough current to run the ESP32-C6 + interface logic. The included PCB uses a [TI TPS562246](https://www.ti.com/product/TPS562246) synchronous step-down (buck) converter to take the 12-14V from pin 4 down to 3.3V for the ESP32, and it accepts **4.5V to 17V**. Faikout boards use a different regulator, and RevK's [wiring wiki](https://codeberg.org/RevK/ESP32-Faikout/wiki/Wiring) rates them for 4V to 36V on pin 4, so don't assume the included PCB can take what a Faikout can. **Do not try to power the board from pin 1.**
 
 **Two physical connector variants exist on the Daikin side:**
 - **Type A** — JST EH (2.5 mm pitch), older models
@@ -157,7 +145,7 @@ The boards above use JST EH male (5-way). For Type B units you need either a Typ
 
 ### Factory-reset button
 
-A long press on the GPIO23 button triggers a Matter factory reset (clears all fabrics and re-enters BLE commissioning mode). A short press opens a new commissioning window if no fabric is paired.
+Hold the GPIO23 button for at least 5 seconds and then release it to trigger a Matter factory reset (clears all fabrics and re-enters BLE commissioning mode). A shorter press opens a new 5-minute commissioning window if no fabric is paired, and does nothing once the device is commissioned.
 
 ---
 
@@ -186,7 +174,7 @@ If you're using a board where the buttons or LEDs are on different pins than the
 Because the included PCB does not have an onboard USB port, you will need a USB-to-Serial (UART) adapter (like an FTDI or CH340 board) to flash the ESP32-C6.
 
 > ⚠️ **CRITICAL: 3.3V Logic vs. 5V Power**
-> The ESP32-C6 requires **3.3V logic** on its `RX0` and `TX0` pins. Applying 5V data signals will permanently damage the chip. However, the board itself must be powered with at least 4V via the `V_in` pin so the onboard step-down converter can function.
+> The ESP32-C6 requires **3.3V logic** on its `RX0` and `TX0` pins. Applying 5V data signals will permanently damage the chip. However, the board itself must be powered with at least 4.5V via the `V_in` pin so the onboard step-down converter can function.
 > 
 > **You must use a UART adapter set to 3.3V logic, but use a 5V pin for power.** Many standard FTDI adapters have a jumper or switch to set the TX/RX logic levels to 3.3V while still exposing a dedicated 5V VCC pin. Do not use a 3.3V power source for `V_in`.
 
@@ -298,9 +286,9 @@ Setup code: 3497-011-2332
 <details>
 <summary>Google Home / Alexa / Home Assistant commissioning</summary>
 
-Google Home, Alexa, and Home Assistant all support Matter commissioning via their respective apps and integrations. Use setup code `3497-011-2332` or the QR code above when prompted.
+Google Home, Alexa, and Home Assistant all support Matter commissioning via their respective apps and integrations. Use setup code `3497-011-2332` when prompted.
 
-**Home Assistant specifically renders the fan slider** for this device, which Apple Home currently omits on their AC tile.
+**Home Assistant renders the fan slider** for this device. Apple Home shows it in the AC's device settings on iOS 27.2, not on the tile.
 
 </details>
 
@@ -313,7 +301,9 @@ Google Home, Alexa, and Home Assistant all support Matter commissioning via thei
 Bump all three for every release, or the device ignores the update. The build fails if the two numbers differ.
 
 * `PROJECT_VER` (e.g. `"1.1"`) and `PROJECT_VER_NUMBER` (e.g. `2`) in `Thermostat_Daikin/CMakeLists.txt`
-* `CONFIG_DEVICE_SOFTWARE_VERSION_NUMBER` in `Thermostat_Daikin/sdkconfig` / `sdkconfig.defaults.esp32c6` (same number)
+* `CONFIG_DEVICE_SOFTWARE_VERSION_NUMBER` in `Thermostat_Daikin/sdkconfig.defaults` (same number)
+
+`sdkconfig` is generated from the defaults files and isn't tracked in git. An existing `sdkconfig` takes priority over them, so after changing a default, either make the same change in `sdkconfig` or delete it to regenerate it.
 
 ### Over serial
 
@@ -339,22 +329,26 @@ chip-tool otasoftwareupdaterequestor announce-otaprovider 1 0 2 0 2 0
 chip-tool basicinformation read software-version 2 0              # afterwards: the new number
 ```
 
-The 1.75 MB image takes about a quarter of an hour over Thread. The AC then restarts into the new version and keeps it once it has run for a minute while attached to the Thread network. If it doesn't get there within 5 minutes, or crashes before that, the bootloader automatically returns to the previous version.
+The roughly 1.7 MB image takes about a quarter of an hour over Thread. The AC then restarts into the new version and keeps it once it has run for a minute while attached to the Thread network. If it doesn't get there within 5 minutes, or crashes before that, the bootloader automatically returns to the previous version.
 
 Rollback needs a bootloader built with rollback enabled (this build, and earlier builds since energy monitoring was added), and the bootloader can only be written over serial. A device with an older bootloader still updates fine over the air, it just won't roll back.
+
+### Image size
+
+Each OTA slot is 1.875 MB (`0x1E0000` in `partitions.csv`), and `idf.py build` prints how much room is left. An update can't change the partition layout, so growing the slots means reflashing every device over serial. Matter clusters this device doesn't create are left out to save space (see `sdkconfig.defaults`). To use one, delete its line there and delete `sdkconfig` so it regenerates. If it's still missing, the build stops with an undefined `Matter...PluginServerInitCallback`.
 
 ---
 
 ## Factory Reset
 
-Hold the onboard reset button (GPIO23 → GND) for **several seconds**. The device will clear all fabrics and re-enter BLE commissioning mode. Make sure to also remove the device from whatever ecosystems you've added it to — controllers cache credentials and will refuse re-pairing otherwise.
+Hold the onboard reset button (GPIO23 → GND) for **at least 5 seconds, then release it**. The device will clear all fabrics and re-enter BLE commissioning mode. Make sure to also remove the device from whatever ecosystems you've added it to — controllers cache credentials and will refuse re-pairing otherwise.
 
 ---
 
 ## Known Issues / Roadmap
 - [x] **Energy reporting** — live power (W) + lifetime imported energy (kWh) via the Matter Electrical Power/Energy Measurement clusters, on S21 units that report it. Home Assistant shows both; the cooling/heating split is read but only logged (Matter carries a single imported/exported energy value, not a per-mode breakdown).
 - [ ] **Swing / louver position** — the S21 protocol supports it; no Matter wiring yet.
-- [x] **X50A & CN_WIRED protocols (experimental)** — drivers for both are built in, with boot-time auto-detection (S21 → X50A → CN_WIRED). **Only S21 is hardware-verified.** X50A rides the same 2-wire UART front-end and should work with the right cable; CN_WIRED is a single-wire pulse protocol that needs a different connector/pull-up. Toggle them via `AC_ENABLE_X50A` / `AC_ENABLE_CNWIRED` in `Thermostat_Daikin/main/app_driver.cpp`.
+- [x] **X50A & CN_WIRED protocols (experimental)** — drivers for both are built in, with boot-time auto-detection (S21 → X50A → CN_WIRED). **Only S21 is hardware-verified.** X50A rides the same 2-wire UART front-end and should work with the right cable; CN_WIRED is a single-wire pulse protocol that needs a different connector/pull-up. RevK's wiring wiki notes that the CN_WIRED power pin can be above 12V without giving a figure, so measure it first: the included PCB is limited to 17V. Toggle them via `AC_ENABLE_X50A` / `AC_ENABLE_CNWIRED` in `Thermostat_Daikin/main/app_driver.cpp`.
 
 ---
 
@@ -405,7 +399,7 @@ Open a [GitHub issue](../../issues/new) with:
 - **What happened:** What you expected, what actually occurred, and steps to reproduce
 - **Logs:** Serial monitor output at 115200 baud, especially anything around the failure point
 
-If your device commissions but the AC never updates state, the most likely cause is the S21 interface — wrong wiring, wrong connector type (Type A vs B), or the wrong GPIO pins compiled in (check [`main/app_driver.cpp`](Thermostat_Daikin/main/app_driver.cpp)). Verify by trying with the [included PCB](Custom%20PCB%20esp32c6/) or a [Faikout](https://codeberg.org/RevK/ESP32-Faikout) board, both of which are known-good.
+If your device commissions but the AC never updates state, the most likely cause is the S21 interface — wrong wiring, wrong connector type (Type A vs B), or the wrong GPIO pins compiled in (check [`main/app_driver.cpp`](Thermostat_Daikin/main/app_driver.cpp)). Verify by trying with the [included PCB](Custom%20PCB%20esp32c6/), which is known-good.
 
 ---
 
@@ -433,7 +427,7 @@ This firmware speaks Matter directly. There's no middleware:
 
 - **Apple Home user without Home Assistant?** It just works. Commission directly from the Home app.
 - **Google Home or Alexa user?** Same — direct Matter commissioning, no third-party hub.
-- **Home Assistant user?** Also works — commission via HA's Matter integration. Bonus: HA renders the fan slider that Apple omits.
+- **Home Assistant user?** Also works — commission via HA's Matter integration. Bonus: HA shows the fan slider whichever iOS version you have.
 - **Multi-ecosystem household?** Multi-fabric commissioning lets the same device live in Apple Home, HA, and Google Home simultaneously.
 
 Matter is an industry-standard protocol — your AC works with the ecosystems you have today and remains compatible with new Matter ecosystems as they appear.
