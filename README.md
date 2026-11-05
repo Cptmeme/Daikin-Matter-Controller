@@ -7,7 +7,7 @@
 
 Open source Matter firmware for Daikin split air conditioners with an S21 port. Adds your AC to Apple Home, Google Home, Alexa, and Home Assistant — no Daikin app, no cloud, no BRP module. **Most modern Daikin split units have an S21 connector inside the indoor unit waiting to be used.**
 
-> This release is the **Room Air Conditioner variant** — Matter device type `0x0072`, with **OnOff, Thermostat, Fan Control, and Temperature Measurement** clusters bundled into a single tile. Power, mode (Heat / Cool / Auto / Off), setpoint, current temperature, and fan speed all surface as native Matter attributes.
+> This release is the **Room Air Conditioner variant** — Matter device type `0x0072`, with **OnOff, Thermostat, Fan Control, Temperature Measurement, and Electrical Power/Energy Measurement** clusters bundled into a single tile. Power, mode (Heat / Cool / Auto / Off, plus Dry and Fan), setpoint, current temperature, fan speed, and power and energy use all surface as native Matter attributes.
 >
 > **Powerful mode** is exposed on a second endpoint as an OnOff plug-in unit. In Apple Home and Google Home it appears as an "Outlet" tile next to the AC tile — rename it to "Powerful" in your home app.
 
@@ -51,19 +51,21 @@ Open source Matter firmware for Daikin split air conditioners with an S21 port. 
 
 - ✅ Matter over Thread — uses the ESP32-C6's 802.15.4 radio, no WiFi required
 - ✅ Compatible with Apple Home, Google Home, Alexa, Home Assistant, etc.
-- ✅ Multi-fabric — commission to multiple hubs simultaneously
+- ✅ Multi-fabric — commission to multiple hubs simultaneously (up to 5 fabrics, and Apple Home alone uses 2)
 - ✅ Native Room Air Conditioner tile (single accessory in your home app)
 - ✅ Power, Mode (Heat/Cool/Auto/Off, plus Dry and Fan for controllers that support them), Setpoint, Current Temperature
 - ✅ Fan speed (Quiet, levels 1 to 5, and Auto on a percent slider)
 - ✅ Powerful mode as a separate switchable endpoint
 - ✅ Live power draw (W) + lifetime energy (kWh) on S21 units that report it — surfaced via Matter Electrical Power/Energy Measurement clusters (Home Assistant displays them and can feed its Energy dashboard)
-- ✅ Two-way state sync — adjusting on the Daikin remote updates your home app within about 5 seconds
+- ✅ Two-way state sync — adjusting on the Daikin remote updates your home app within about 5 seconds (up to about 20 seconds if it comes right after a command from your home app)
 - ✅ Factory reset via long press on the onboard button
 - ✅ OTA-ready — dual OTA partitions with bootloader app-rollback for safe over-the-air updates (via a Matter OTA provider)
 
 > **Fan speed visibility note:** Apple Home on iOS 27.2 shows the fan slider in the AC's device settings, not on the tile. It may have appeared as early as iOS 27.0, but that's unconfirmed, and older versions don't show it. Google Home on iOS doesn't show it either. Home Assistant does. A missing slider is a controller-side UI limitation, not a firmware bug — the FanControl cluster is correctly registered and writable from any Matter controller that chooses to surface it.
 >
 > **Fan slider scale:** 0 is Quiet, 1–99 steps through levels 1 to 5 (a new level about every 20%), and 100 is Auto. Apple Home has no separate options for Quiet and Auto, so they sit at the two ends of the slider. A controller that shows fan modes may label Quiet as Off, because Matter treats 0% as Off, but the fan doesn't stop.
+>
+> **Setpoints:** Matter has separate heat and cool setpoints, but the AC only has one target. While the AC is on, only the setpoint for the current mode applies, and switching between heat and cool applies that mode's stored setpoint. In Auto, or while the AC is off, the latest setpoint you set wins.
 
 ---
 
@@ -85,12 +87,12 @@ Open source Matter firmware for Daikin split air conditioners with an S21 port. 
 
 **Recommended path: use a known-good interface board**
 
-You need *something* between the ESP32-C6 and the Daikin's S21 port — the S21 bus is 5V logic and the ESP32 is 3.3V. A standard bidirectional level shifter (e.g. BSS138-based, like Adafruit / SparkFun "logic level converter" boards) works fine for the data lines if wired correctly; that's the same approach the included PCB uses. The reason for recommending a known-good board over breadboarding is more about getting the power supply, connectors, and protection right than about the level shifting being especially tricky.
+You need *something* between the ESP32-C6 and the Daikin's S21 port — the S21 bus is 5V logic and the ESP32 is 3.3V. A standard bidirectional level shifter (e.g. BSS138-based, like Adafruit / SparkFun "logic level converter" boards) can work for the data lines if wired correctly, but see the polarity warning below: the included PCB also uses BSS138 FETs, wired as inverters rather than as a bidirectional shifter. The reason for recommending a known-good board over breadboarding is more about getting the power supply, connectors, and protection right than about the level shifting being especially tricky.
 
 > ⚠️ **Important — the included PCB inverts the S21 signals in hardware, and the firmware is written to match.** The S21 UART in [`main/s21_driver.cpp`](Thermostat_Daikin/main/s21_driver.cpp) runs with both lines inverted (see `uart_set_line_inverse` in `s21_line_init`). If you wire up a generic *non-inverting* level shifter, the AC will receive the wrong polarity and communication will silently fail. You then have two choices:
 >
 > - **Add a hardware inverter** in series with each S21 line (single transistor or a hex inverter IC like 74HC04), or
-> - **Edit the firmware** to remove the inversion — delete the `uart_set_line_inverse` call in [`main/s21_driver.cpp`](Thermostat_Daikin/main/s21_driver.cpp).
+> - **Edit the firmware** to remove the inversion — delete the `uart_set_line_inverse` call in [`main/s21_driver.cpp`](Thermostat_Daikin/main/s21_driver.cpp). The experimental backends have their own settings: `X50A_INVERT_LINES`, `CNWIRED_RX_INVERT` and `CNWIRED_TX_INVERT`.
 >
 > If you're using the included PCB, a Faikout, or any other interface that expects inverted-polarity drive, leave the firmware alone — it's already correct.
 >
@@ -192,13 +194,13 @@ Follow Espressif's official setup: **[Getting the ESP-Matter Repositories](https
 
 ```bash
 mkdir -p ~/esp && cd ~/esp
-git clone -b v5.4.1 --recursive https://github.com/espressif/esp-idf.git
+git clone -b v5.5.4 --recursive https://github.com/espressif/esp-idf.git
 cd esp-idf && ./install.sh esp32c6 && cd ..
 git clone -b release/v1.5 --depth 1 https://github.com/espressif/esp-matter.git
 cd esp-matter && ./install.sh && cd ..
 ```
 
-**Versions.** This firmware is built against **ESP-Matter v1.5**. Its clean, officially-supported pairing is **ESP-IDF v5.4.1** — with that combo the build "just works" apart from the optional cosmetic patch below. **ESP-IDF v5.5.x also builds, but requires the first SDK patch below** (its `@`-response-file compiler flags otherwise break connectedhomeip's GN argument generation).
+**Versions.** This firmware is built against **ESP-Matter v1.5**. Recent releases have been built and tested with **ESP-IDF v5.5.4, which the commands above install and which requires the SDK patch below** (its `@`-response-file compiler flags otherwise break connectedhomeip's GN argument generation). ESP-IDF v5.4.1 is ESP-Matter v1.5's officially-supported pairing and doesn't need the patch, but the current code hasn't been tested on it.
 
 ### 1a. Apply the ESP-Matter SDK patch
 
@@ -300,7 +302,7 @@ Google Home, Alexa, and Home Assistant all support Matter commissioning via thei
 
 Bump all three for every release, or the device ignores the update. The build fails if the two numbers differ.
 
-* `PROJECT_VER` (e.g. `"1.1"`) and `PROJECT_VER_NUMBER` (e.g. `2`) in `Thermostat_Daikin/CMakeLists.txt`
+* `PROJECT_VER` (e.g. `"1.6"`) and `PROJECT_VER_NUMBER` (e.g. `7`) in `Thermostat_Daikin/CMakeLists.txt`
 * `CONFIG_DEVICE_SOFTWARE_VERSION_NUMBER` in `Thermostat_Daikin/sdkconfig.defaults` (same number)
 
 `sdkconfig` is generated from the defaults files and isn't tracked in git. An existing `sdkconfig` takes priority over them, so after changing a default, either make the same change in `sdkconfig` or delete it to regenerate it.
@@ -313,7 +315,7 @@ A normal `idf.py -p <PORT> flash` over the UART adapter still works (see [Hardwa
 
 The build also produces `build/thermostat-ota.bin`, a Matter OTA image. Apple Home and Google Home only update certified devices, so you serve it yourself with the Matter SDK's host tools. Build them from the SDK with `./scripts/build/build_examples.py --target darwin-arm64-chip-tool --target darwin-arm64-ota-provider build`.
 
-One-time setup: in the Home app, turn on pairing mode for the AC, then add the provider and the AC to `chip-tool`'s fabric:
+One-time setup: in the Home app, turn on pairing mode for the AC, then add the provider and the AC to `chip-tool`'s fabric. This makes `chip-tool` another admin on the AC, which uses one of its 5 fabric slots:
 
 ```bash
 chip-tool pairing code 2 <setup-code-from-home-app>              # AC = node 2
@@ -330,6 +332,8 @@ chip-tool basicinformation read software-version 2 0              # afterwards: 
 ```
 
 The roughly 1.7 MB image takes about a quarter of an hour over Thread. The AC then restarts into the new version and keeps it once it has run for a minute while attached to the Thread network. If it doesn't get there within 5 minutes, or crashes before that, the bootloader automatically returns to the previous version.
+
+Give your home apps a few minutes to reconnect after the restart, and don't poll the AC with repeated `chip-tool` commands. Each one opens a new secure session, and while the AC is setting one up it answers others with "busy", which can show up as "No Response" in your home app.
 
 Rollback needs a bootloader built with rollback enabled (this build, and earlier builds since energy monitoring was added), and the bootloader can only be written over serial. A device with an older bootloader still updates fine over the air, it just won't roll back.
 
@@ -348,21 +352,21 @@ Hold the onboard reset button (GPIO23 → GND) for **at least 5 seconds, then re
 ## Known Issues / Roadmap
 - [x] **Energy reporting** — live power (W) + lifetime imported energy (kWh) via the Matter Electrical Power/Energy Measurement clusters, on S21 units that report it. Home Assistant shows both; the cooling/heating split is read but only logged (Matter carries a single imported/exported energy value, not a per-mode breakdown).
 - [ ] **Swing / louver position** — the S21 protocol supports it; no Matter wiring yet.
+- [ ] **Econo, comfort, streamer and other S21 settings** — not exposed over Matter yet. Toggling Powerful leaves them as they are.
 - [x] **X50A & CN_WIRED protocols (experimental)** — drivers for both are built in, with boot-time auto-detection (S21 → X50A → CN_WIRED). **Only S21 is hardware-verified.** X50A rides the same 2-wire UART front-end and should work with the right cable; CN_WIRED is a single-wire pulse protocol that needs a different connector/pull-up. RevK's wiring wiki notes that the CN_WIRED power pin can be above 12V without giving a figure, so measure it first: the included PCB is limited to 17V. Toggle them via `AC_ENABLE_X50A` / `AC_ENABLE_CNWIRED` in `Thermostat_Daikin/main/app_driver.cpp`.
 
 ---
 
 ## Customizing the device name
 
-To change the manufacturer / model / default name shown in your home app, edit [`main/CHIPProjectConfig.h`](Thermostat_Daikin/main/CHIPProjectConfig.h) before building:
+To change the manufacturer and model shown in your home app, edit [`main/CHIPProjectConfig.h`](Thermostat_Daikin/main/CHIPProjectConfig.h) before building:
 
 ```c
 #define CHIP_DEVICE_CONFIG_DEVICE_VENDOR_NAME   "Daikin"
 #define CHIP_DEVICE_CONFIG_DEVICE_PRODUCT_NAME  "Daikin A/C"
-#define CHIP_DEVICE_CONFIG_DEFAULT_NODE_LABEL   "Daikin Thermostat"
 ```
 
-Apple Home, Google Home, and Alexa display these in the device's settings page. Changing them after the device is already commissioned won't update existing controllers — you'll need to factory reset and re-commission.
+Apple Home, Google Home, and Alexa display these in the device's settings page. The device's own name is whatever you call it in your home app. Changing them after the device is already commissioned won't update existing controllers — you'll need to factory reset and re-commission.
 
 ---
 
