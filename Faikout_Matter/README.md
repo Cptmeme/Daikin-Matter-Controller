@@ -4,7 +4,7 @@
 
 Faikout Matter functions just as the original [Faikout firmware](https://codeberg.org/RevK/ESP32-Faikout) by RevK, but adds Matter support over Wi-Fi. It runs on Faikin and Faikout boards and on the custom PCB in this repo, and keeps what Faikout already does: the web interface, MQTT, Home Assistant discovery, BLE sensors and updates over Wi-Fi.
 
-Apart from adding Matter, it differs from the original in two ways: it's built with ESP-IDF 5.5 rather than 6, and it doesn't download updates from RevK's server.
+Apart from adding Matter, it differs from the original in a few ways: it's built with ESP-IDF 5.5 rather than 6, it doesn't download updates from RevK's server, and some code Faikout doesn't use is left out to make room (see [below](#whats-left-out-to-save-space)).
 
 It's part of [Daikin Matter Controller](../README.md). To use the custom PCB on Thread, use the original firmware there instead.
 
@@ -67,7 +67,7 @@ The full list is in [`sdkconfig.defaults.matter-small`](sdkconfig.defaults.matte
 ## How it works
 
 1. Faikout starts as usual and connects to your Wi-Fi. Set up a new board through its access point, as with stock Faikout.
-2. Once you turn Matter on, it starts when Wi-Fi is up, and Faikout stays in control of Wi-Fi.
+2. Once you turn Matter on, it starts a few seconds after the network is up, and Faikout stays in control of Wi-Fi.
 3. Pairing happens over your network, without BLE, so BLE stays free for Faikout's sensors.
 
 Matter commands go through the same functions as Faikout's web interface and MQTT, so they should work with any AC protocol Faikout supports. Matter's device layout, fan slider and setpoint behaviour match the [original firmware](../README.md#features).
@@ -106,7 +106,7 @@ Flashing doesn't erase the settings, so your Wi-Fi details should carry over. Bo
 
 Everything for Matter is on the **Matter** tab of Faikout's settings page. Pairing is at the top.
 
-1. Matter is off until you turn it on, so turn on the **Matter** switch on that tab and save. The board restarts.
+1. Matter is off until you turn it on, so turn on the **Matter** switch on that tab and save. The board restarts, and the tab then shows the rest of the Matter settings.
 2. A board that isn't paired yet stays open for pairing for 15 minutes after it starts. Otherwise, select **Open pairing for 5 minutes**.
 3. Add a device in your home app, and scan the QR code on the tab or enter the number below it.
 
@@ -149,7 +149,7 @@ Faikout's own update feature stays, but the update server is left empty, so this
 - **Pairing code:** the Matter tab shows it to anyone on your network who can open the settings page, unless you set a password. Only open pairing when you need it.
 - **Certification:** it uses SDK test credentials, so home apps show the device as uncertified. It's for personal use only.
 - **Changing Wi-Fi:** change networks in Faikout's settings, not through a Matter controller.
-- **Flash space:** `c5` is close to outgrowing its update slot, with about 4 KB left. `c6` has about 42 KB, and the other boards about 230 KB or more.
+- **Flash space:** `c5` only just fits its update slot, with about 1.5 KB left. `c6` has about 39 KB, and the other boards about 230 KB or more.
 - **Memory:** `n8`, `c6` and `c5` have no PSRAM, so they may run short of RAM, especially with BLE sensors. Even with PSRAM, `pico` had only 46 KB of internal memory free once paired. The Matter tab shows free memory.
 
 ## Origin and licence
@@ -167,8 +167,8 @@ This folder contains modified copies of these upstream versions:
 Changes made on 2026-11-05:
 
 - **Added:** `main/matter_bridge.cpp` and `.h`, `main/CHIPProjectConfig.h`, `build.sh`, `partitions_4m_matter.csv`, the `sdkconfig.defaults.matter*` files and this README.
-- **`main/Faikout.c`:** hooks for Matter, a Matter settings tab, and removal of a comment on line 3 aimed at AI tools.
-- **`main/settings.def`:** the `matter.enable` setting, and the S21 pins of the custom PCB as the C5 and C6 defaults.
+- **`main/Faikout.c`:** hooks for Matter, a Matter settings tab, the board's own LED pins on `pico` when the settings name a pin the chip doesn't have, and removal of a comment on line 3 aimed at AI tools.
+- **`main/settings.def`:** the Matter settings (`matter.*` and `mx.*`), and the S21 pins of the custom PCB as the C5 and C6 defaults.
 - **`components/ESP32-RevK/settings.def`:** the custom PCB's button as the C5 and C6 default, and automatic updates off by default.
 - **`components/ESP32-RevK/revk.c`:** removed RevK's unfinished 2023 Matter workarounds, which turned off the setup access point and mDNS. Also made two event names that only exist in ESP-IDF 6 conditional, used ESP-IDF 5's built-in Ethernet driver, and added a hook so an app can name its extra settings tabs.
-- **Build files:** builds with ESP-IDF 5.5, because esp-matter v1.5 doesn't support ESP-IDF 6. Uses ESP-IDF 5's built-in Ethernet driver instead of the `ksz8851snl` package, which needs ESP-IDF 6.
+- **Build files:** builds with ESP-IDF 5.5, because esp-matter v1.5 doesn't support ESP-IDF 6. Uses ESP-IDF 5's built-in Ethernet driver instead of the `ksz8851snl` package, which needs ESP-IDF 6. Adds Espressif's `qrcode` component, for the pairing QR code.

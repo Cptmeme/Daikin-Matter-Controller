@@ -10,6 +10,8 @@ Open source Matter firmware for Daikin split air conditioners with an S21 port. 
 > Both firmwares below appear as a **Room Air Conditioner** — Matter device type `0x0072`, with **OnOff, Thermostat, Fan Control, Temperature Measurement, and Electrical Power/Energy Measurement** clusters bundled into a single tile. Power, mode (Heat / Cool / Auto / Off, plus Dry and Fan), setpoint, current temperature, fan speed, and power and energy use all surface as native Matter attributes.
 >
 > **Powerful mode** is exposed on a second endpoint as an OnOff plug-in unit. In Apple Home and Google Home it appears as an "Outlet" tile next to the AC tile — rename it to "Powerful" in your home app.
+>
+> In Faikout Matter, power and energy use and Powerful are off until you turn them on, along with switches for the AC's other modes: see [what it exposes](Faikout_Matter/README.md#what-it-exposes-over-matter).
 
 > ⚠️ Uses ESP-Matter SDK test credentials (vendor `0xFFF1`, not VID/PID-certified). Functional for personal use; not suitable for resale as a certified Matter product.
 
@@ -172,7 +174,7 @@ Two interface options:
 1. **The reference PCB included in this repo, known to work end-to-end** — see the [`Custom PCB esp32c6/`](Custom%20PCB%20esp32c6/) folder. KiCad project + BOM. Built around a WT0132C6-S5, a BSS138 for level shifting, and a JST EH 5-way for the S21 connection. **Thread + Wi-Fi capable** thanks to the C6's 802.15.4 radio, and it can run either firmware. *Note: This board does not feature an onboard USB port. Flashing is done via exposed `RX0` and `TX0` headers using an external USB-to-Serial adapter, and the board is powered via the `V_in` pin, which accepts **4.5V to 17V** (the limits of its TPS562246 regulator, whose absolute maximum is 19V). The 12-14V from S21 pin 4 is well within that.*
 2. **A RevK [ESP32-Faikout](https://codeberg.org/RevK/ESP32-Faikout) or older Faikin board.** Use [Faikout Matter](Faikout_Matter/README.md) to keep Faikout's firmware and add Matter, or the `wifi-s3` or `wifi-pico` [pre-built binary](#pre-built-binaries) of this firmware. Faikout boards are sold by RevK and on Amazon UK — check the Faikout repo for current availability.
 
-> **⚠️ Faikout boards = Matter over Wi-Fi only.** Current Faikout PCBs use ESP32 / ESP32-S3 chips, neither of which has an 802.15.4 radio, so they can't use Thread and you lose its mesh / low-power benefits. A future Faikout revision based on the ESP32-C6 (or similar) would change this — track the Faikout repo if that matters to you.
+> **⚠️ Faikout boards = no Thread.** Faikout and Faikin boards use ESP32 / ESP32-S3 chips, neither of which has an 802.15.4 radio, so they can't use Thread and you lose its mesh / low-power benefits. They use Matter over Wi-Fi, or over Ethernet on FaikoutETH and FaikoutPOE with Faikout Matter. A future Faikout revision based on the ESP32-C6 (or similar) would change this — track the Faikout repo if that matters to you.
 >
 > This firmware's Wi-Fi builds for these boards haven't been run on one yet. See [Pre-built binaries](#pre-built-binaries) for which boards their pins match.
 
@@ -426,17 +428,18 @@ Each OTA slot is 1.875 MB (`0x1E0000` in `partitions.csv`), and `idf.py build` p
 
 Hold the onboard reset button (GPIO23 → GND) for **at least 5 seconds, then release it**. The device will clear all fabrics and re-enter BLE commissioning mode. Make sure to also remove the device from whatever ecosystems you've added it to — controllers cache credentials and will refuse re-pairing otherwise.
 
-Faikout Matter has no Matter reset button. Remove the device in your home app instead.
+Faikout Matter has no Matter reset button. Remove the device in your home app, or use **Remove all pairings** on its Matter settings tab.
 
 ---
 
 ## Known Issues / Roadmap
 - [x] **Energy reporting** — live power (W) + lifetime imported energy (kWh) via the Matter Electrical Power/Energy Measurement clusters, on S21 units that report it. Home Assistant shows both; the cooling/heating split is read but only logged (Matter carries a single imported/exported energy value, not a per-mode breakdown).
-- [ ] **Swing / louver position** — the S21 protocol supports it; no Matter wiring yet.
+- [ ] **Swing / louver position** — the S21 protocol supports it; not exposed over Matter in the original firmware yet. Faikout Matter can expose horizontal and vertical swing as opt-in on/off switches, but not the louver position.
 - [ ] **Econo, comfort, streamer and other S21 settings** — not exposed over Matter in the original firmware yet. Toggling Powerful leaves them as they are. Faikout Matter can expose them as opt-in switches.
 - [x] **X50A & CN_WIRED protocols (experimental)** — drivers for both are built in, with boot-time auto-detection (S21 → X50A → CN_WIRED). **Only S21 is hardware-verified.** X50A rides the same 2-wire UART front-end and should work with the right cable; CN_WIRED is a single-wire pulse protocol that needs a different connector/pull-up. RevK's wiring wiki notes that the CN_WIRED power pin can be above 12V without giving a figure, so measure it first: the included PCB is limited to 17V. Toggle them via `AC_ENABLE_X50A` / `AC_ENABLE_CNWIRED` in `Thermostat_Daikin/main/app_driver.cpp`.
 - [ ] **Faikout Matter** — test with a real AC.
-- [x] **Faikout Matter pairing** — a QR code, its own pairing code for each board, a settable name, and a button to turn Matter off.
+- [x] **Faikout Matter pairing** — its own Matter settings tab, with a QR code, its own pairing code for each board, a settable name, a switch to turn Matter off, and a button to remove all pairings.
+- [x] **Faikout Matter extras** — power and energy, Powerful, and switches for Night, Econo, Comfort, Streamer, Intelligent eye, Outdoor quiet, both swings and the LED, each opt-in.
 - [ ] **Pre-built images** — test everything except `thread-c6` on real hardware.
 
 ---
@@ -452,7 +455,7 @@ To change the manufacturer and model shown in your home app, edit [`main/CHIPPro
 
 Apple Home, Google Home, and Alexa display these in the device's settings page. The device's own name is whatever you call it in your home app. Changing them after the device is already commissioned won't update existing controllers — you'll need to factory reset and re-commission.
 
-For Faikout Matter, the same settings are in [`Faikout_Matter/main/CHIPProjectConfig.h`](Faikout_Matter/main/CHIPProjectConfig.h).
+For Faikout Matter, **Matter name** on its Matter settings tab sets the product name without rebuilding. The vendor name, and the product name used when that setting is empty, are in [`Faikout_Matter/main/CHIPProjectConfig.h`](Faikout_Matter/main/CHIPProjectConfig.h).
 
 ---
 
@@ -472,7 +475,7 @@ Neither firmware is Matter Certified or Thread Certified. Both implement the Mat
 
 Devices flashed with either firmware will appear in Matter ecosystems as **uncertified Matter devices**. Most ecosystems show a one-time warning during commissioning ("Add Anyway" in Apple Home); this is normal and expected.
 
-Both firmwares use the publicly available ESP-Matter test VID/PID and setup code, which is acceptable for personal use and development but cannot be used in commercial certified products.
+Both firmwares use the publicly available ESP-Matter test VID/PID, and the original firmware also uses its test setup code. That's acceptable for personal use and development but cannot be used in commercial certified products. Faikout Matter gives each board its own pairing code instead.
 
 "Matter" is a trademark of the Connectivity Standards Alliance. "Thread" is a trademark of the Thread Group. "Daikin" is a trademark of Daikin Industries, Ltd. "Faikout" is a registered trademark of its owner. This project is not affiliated with, endorsed by, or sponsored by any of these organizations.
 
