@@ -44,4 +44,7 @@ private:
     int m_tx_pin;
     int m_rx_pin;
     s21_state_change_cb_t m_callback;
+    bool m_swing;   // last swing and LED state from the unit, kept when sending modes
+    bool m_led;
+    int m_miss;     // consecutive polls with no valid packet
 };

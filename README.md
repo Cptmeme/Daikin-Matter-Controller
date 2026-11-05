@@ -53,7 +53,7 @@ Open source Matter firmware for Daikin split air conditioners with an S21 port. 
 - ✅ Compatible with Apple Home, Google Home, Alexa, Home Assistant, etc.
 - ✅ Multi-fabric — commission to multiple hubs simultaneously
 - ✅ Native Room Air Conditioner tile (single accessory in your home app)
-- ✅ Power, Mode (Heat/Cool/Auto/Off), Setpoint, Current Temperature
+- ✅ Power, Mode (Heat/Cool/Auto/Off, plus Dry and Fan for controllers that support them), Setpoint, Current Temperature
 - ✅ Fan speed (Quiet, levels 1 to 5, and Auto on a percent slider)
 - ✅ Powerful mode as a separate switchable endpoint
 - ✅ Live power draw (W) + lifetime energy (kWh) on S21 units that report it — surfaced via Matter Electrical Power/Energy Measurement clusters (Home Assistant displays them and can feed its Energy dashboard)

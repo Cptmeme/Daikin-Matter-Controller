@@ -26,8 +26,8 @@ endif(NOT DEFINED ENV{ESP_MATTER_DEVICE_PATH})
 
 # Firmware version. Bump both for every OTA release, together with
 # CONFIG_DEVICE_SOFTWARE_VERSION_NUMBER in sdkconfig.defaults (checked below).
-set(PROJECT_VER "1.5")
-set(PROJECT_VER_NUMBER 6)
+set(PROJECT_VER "1.6")
+set(PROJECT_VER_NUMBER 7)
 
 set(ESP_MATTER_PATH $ENV{ESP_MATTER_PATH})
 set(MATTER_SDK_PATH ${ESP_MATTER_PATH}/connectedhomeip/connectedhomeip)

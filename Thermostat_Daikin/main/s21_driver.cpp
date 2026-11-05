@@ -13,6 +13,8 @@ static const char *TAG = "S21_DRIVER";
 
 // How long a status that disagrees with a command we just sent is ignored.
 #define S21_CONFIRM_TIMEOUT_US (15 * 1000000LL)
+// How many polls in a row the AC can stay silent before the link counts as lost.
+#define S21_LINK_LOST_POLLS 3
 
 // 1 = hardware UART, 0 = the older bit-banged software UART. Keep the bit-banged
 // version until the UART has proven itself on real units.
@@ -151,6 +153,10 @@ DaikinS21::DaikinS21() {
     m_rg_supported = true;
     m_rg_fan_valid = false;
     m_rg_miss = 0;
+    m_rd_supported = true;
+    m_rd_miss = 0;
+    m_g6_valid = false;
+    m_link_miss = 0;
     m_callback = nullptr;
     m_state.power = false;
     m_state.mode = FAIKIN_MODE_AUTO;
@@ -158,6 +164,7 @@ DaikinS21::DaikinS21() {
     m_state.fan_speed = FAIKIN_FAN_AUTO;
     m_state.current_temp = 21.0;
     m_state.powerful = false;
+    m_state.compressor_on = -1;
     m_state.power_w = -1;
     m_state.energy_total_wh = -1;
     m_state.energy_cool_wh = -1;
@@ -219,6 +226,7 @@ esp_err_t DaikinS21::SendPacket(uint8_t cmd1, uint8_t cmd2, uint8_t *payload, in
     int rx_idx = 0;
     if (ack == STX) rx_buf[rx_idx++] = STX;
     else if (ack == ACK) {
+        if (cmd1 == 'D') return ESP_OK;   // commands only get the ACK, no reply follows
         int val = s21_line_read(500);
         if (val == STX) rx_buf[rx_idx++] = STX;
         else return ESP_OK; 
@@ -231,10 +239,11 @@ esp_err_t DaikinS21::SendPacket(uint8_t cmd1, uint8_t cmd2, uint8_t *payload, in
     }
 
     if (rx_idx > 3 && rx_buf[rx_idx-1] == ETX) {
+        // ACK even a bad frame. Otherwise the AC may resend it and collide with the next command.
+        const uint8_t ack_byte = ACK;
+        s21_line_write(&ack_byte, 1);
         uint8_t calc_crc = s21_checksum(rx_buf, rx_idx);
         if (calc_crc == rx_buf[rx_idx-2]) {
-            const uint8_t ack_byte = ACK;
-            s21_line_write(&ack_byte, 1);
             s_connected = true;
             
             // DEBUG DUMP (Keep this to verify mode byte)
@@ -252,6 +261,9 @@ esp_err_t DaikinS21::SendPacket(uint8_t cmd1, uint8_t cmd2, uint8_t *payload, in
             }
             else if (rx_buf[1] == 'S' && rx_buf[2] == 'G') {   // RG -> fan setting
                  ParseFanSG(&rx_buf[3], rx_idx - 5);
+            }
+            else if (rx_buf[1] == 'S' && rx_buf[2] == 'd') {   // Rd -> compressor speed
+                 ParseCompressorSd(&rx_buf[3], rx_idx - 5);
             }
             else if (rx_buf[1] == 'G' && rx_buf[2] == '6') {
                  ParseSettingsG6(&rx_buf[3], rx_idx - 5);
@@ -283,7 +295,10 @@ void DaikinS21::ParseStatusG1(uint8_t *payload, int len) {
     else if (raw_mode == 0x36) mode = FAIKIN_MODE_FAN;  // '6'
     
     bool pwr = (payload[0] == '1');
-    float t = s21_decode_target_temp(payload[2]);
+    // Only heat, cool and auto have a setpoint. Keep the last one in Dry and Fan, whose
+    // value means nothing, so coming back to heat or cool doesn't pick up a wrong target.
+    bool reports_setpoint = (mode != FAIKIN_MODE_FAN && mode != FAIKIN_MODE_DRY);
+    float t = reports_setpoint ? s21_decode_target_temp(payload[2]) : m_state.target_temp;
     bool just_confirmed = false;
 
     // RG is more reliable, so G1's fan byte is only the fallback. Some units report Quiet
@@ -358,9 +373,24 @@ void DaikinS21::UpdateFanFromAC(uint8_t fan) {
     }
 }
 
+void DaikinS21::ParseCompressorSd(uint8_t *payload, int len) {
+    // Three reversed digits, unlike the 4-character temperature sensors.
+    if (len < 3 || !s21_valid_int_sensor(payload)) return;
+    int speed = (payload[0] - '0') + (payload[1] - '0') * 10 + (payload[2] - '0') * 100;
+    int8_t on = speed > 0 ? 1 : 0;
+    if (m_state.compressor_on != on) {
+        ESP_LOGI(TAG, "Compressor %s", on ? "running" : "stopped");
+        m_state.compressor_on = on;
+        if (m_callback) m_callback(&m_state);
+    }
+}
+
 void DaikinS21::ParseSettingsG6(uint8_t *payload, int len) {
     if (len < 4) return;
-    
+
+    memcpy(m_g6, payload, sizeof(m_g6));
+    m_g6_valid = true;
+
     // Check the powerful bit (0x02) on the first payload byte
     bool pow = (payload[0] & S21_FLAG_POWERFUL) != 0;
 
@@ -390,14 +420,16 @@ void DaikinS21::SendControlD6() {
     // Clear this first: a new command can arrive while SendPacket waits for the reply.
     m_powerful_dirty = false;
 
-    // Byte 0: Base '0' + Powerful (0x02) + Comfort (0x40) + Quiet (0x80)
-    payload[0] = S21_D6_BASE_BYTE;
-    if (m_state.powerful) payload[0] += S21_FLAG_POWERFUL;
-    
-    // Bytes 1-3: Default to '0' (Unless you implement streamer/sensor/led later)
-    payload[1] = S21_D6_BASE_BYTE;
+    // D6 sets everything at once, so start from what the AC last reported. That keeps
+    // comfort, quiet, streamer, sensor and LED as they are. Byte 2 isn't used.
+    if (m_g6_valid) {
+        memcpy(payload, m_g6, sizeof(payload));
+    } else {
+        memset(payload, S21_D6_BASE_BYTE, sizeof(payload));
+    }
     payload[2] = S21_D6_BASE_BYTE;
-    payload[3] = S21_D6_BASE_BYTE;
+    if (m_state.powerful) payload[0] |= S21_FLAG_POWERFUL;
+    else payload[0] &= ~S21_FLAG_POWERFUL;
 
     SendPacket('D', '6', payload, 4);
     m_d6_confirm_until = esp_timer_get_time() + S21_CONFIRM_TIMEOUT_US;
@@ -481,6 +513,17 @@ void DaikinS21::SendControlD1() {
     m_fan_confirm_until = m_d1_confirm_until;
 }
 
+void DaikinS21::PollOptional(uint8_t cmd2, bool &supported, int &miss) {
+    if (!supported) return;
+    vTaskDelay(pdMS_TO_TICKS(100));
+    if (SendPacket('R', cmd2, NULL, 0) == ESP_OK) {
+        miss = 0;
+    } else if (++miss >= 3) {
+        supported = false;
+        ESP_LOGW(TAG, "AC does not answer R%c", cmd2);
+    }
+}
+
 void DaikinS21::Poll() {
     if (!s_connected) {
         SendPacket('F', '8', NULL, 0);
@@ -499,7 +542,16 @@ void DaikinS21::Poll() {
     }
     
     // Poll Status (F1 -> G1)
-    SendPacket('F', '1', NULL, 0);
+    if (SendPacket('F', '1', NULL, 0) == ESP_ERR_TIMEOUT) {
+        if (++m_link_miss >= S21_LINK_LOST_POLLS) {
+            ESP_LOGW(TAG, "AC stopped answering");
+            m_link_miss = 0;
+            s_connected = false;   // the manager re-detects the protocol
+            return;
+        }
+    } else {
+        m_link_miss = 0;
+    }
     vTaskDelay(pdMS_TO_TICKS(500));
 
     SendPacket('F', '6', NULL, 0);
@@ -508,17 +560,11 @@ void DaikinS21::Poll() {
     // Poll Sensor (RH -> SH)
     SendPacket('R', 'H', NULL, 0);
 
-    // Poll the fan setting (RG -> SG). Not every unit answers; G1 is the fallback.
-    if (m_rg_supported) {
-        vTaskDelay(pdMS_TO_TICKS(300));
-        if (SendPacket('R', 'G', NULL, 0) == ESP_OK) {
-            m_rg_miss = 0;
-        } else if (++m_rg_miss >= 3) {
-            m_rg_supported = false;
-            m_rg_fan_valid = false;
-            ESP_LOGW(TAG, "AC does not answer RG; reading the fan setting from G1");
-        }
-    }
+    // Poll the fan setting (RG -> SG) and compressor speed (Rd -> Sd). Not every unit answers.
+    // G1's fan byte and the temperatures are the fallbacks.
+    PollOptional('G', m_rg_supported, m_rg_miss);
+    if (!m_rg_supported) m_rg_fan_valid = false;
+    PollOptional('d', m_rd_supported, m_rd_miss);
 
     // Poll energy meters (S21 FX60 power, FM total Wh, FU04 cool/heat Wh).
     // Many units don't support these; if the unit ignores/NAKs them for a few

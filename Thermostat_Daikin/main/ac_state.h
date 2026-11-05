@@ -15,6 +15,7 @@ typedef struct {
     float outside_temp;  // Celsius
     uint8_t fan_speed;   // FAIKIN_FAN_*
     bool powerful;
+    int8_t compressor_on; // 1 running, 0 stopped, -1 unknown. S21 only for now.
 
     // Energy monitoring. S21-only for now (FX60/FM/FU04); -1 = unknown / the
     // unit doesn't report it. Other backends leave these at -1.

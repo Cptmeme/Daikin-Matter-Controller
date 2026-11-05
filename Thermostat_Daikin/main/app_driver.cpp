@@ -40,6 +40,29 @@ static DaikinX50A s_x50a;        // X50A protocol backend (experimental/unverifi
 static DaikinCNWired s_cnwired;  // CN_WIRED protocol backend (experimental/unverified)
 static ACManager s21;            // multi-protocol manager (keeps the 's21' name used throughout this file)
 
+// Thermostat running state bits.
+static constexpr uint16_t k_running_heat = 0x1;
+static constexpr uint16_t k_running_cool = 0x2;
+static constexpr uint16_t k_running_fan  = 0x4;
+
+// Use the AC's compressor state when it reports one, otherwise estimate from the temperatures.
+static uint16_t running_state_from(const ac_state_t &s)
+{
+    if (!s.power) return 0;
+    if (s.mode == FAIKIN_MODE_FAN) return k_running_fan;
+    if (s.compressor_on == 0) return 0;
+    bool running = (s.compressor_on == 1);
+    switch (s.mode) {
+        case FAIKIN_MODE_HEAT: return (running || s.current_temp < s.target_temp) ? k_running_heat : 0;
+        case FAIKIN_MODE_COOL: return (running || s.current_temp > s.target_temp) ? k_running_cool : 0;
+        case FAIKIN_MODE_AUTO:
+            if (!running) return 0;
+            return s.current_temp < s.target_temp ? k_running_heat : k_running_cool;
+        case FAIKIN_MODE_DRY:  return running ? k_running_cool : 0;
+        default:               return 0;
+    }
+}
+
 // Fan slider scale: 0% is Quiet, 1-99% steps through levels 1 to 5, and 100% is Auto.
 // Apple Home only offers the slider, so Quiet and Auto sit at its two ends.
 // Matter ties 0% to FanMode Off, so Off means Quiet here. The fan never actually stops.
@@ -141,9 +164,10 @@ static void AppDriverUpdateTask(intptr_t context)
 
     // Target temperature.
     val = esp_matter_int16(FLOAT_TO_MATTER(data->state.target_temp));
-    if (data->state.mode == FAIKIN_MODE_HEAT) {
+    if (data->state.mode == FAIKIN_MODE_HEAT || data->state.mode == FAIKIN_MODE_AUTO) {
         esp_matter::attribute::report(ac_endpoint_id, Thermostat::Id, Thermostat::Attributes::OccupiedHeatingSetpoint::Id, &val);
-    } else {
+    }
+    if (data->state.mode == FAIKIN_MODE_COOL || data->state.mode == FAIKIN_MODE_AUTO) {
         esp_matter::attribute::report(ac_endpoint_id, Thermostat::Id, Thermostat::Attributes::OccupiedCoolingSetpoint::Id, &val);
     }
 
@@ -158,22 +182,15 @@ static void AppDriverUpdateTask(intptr_t context)
             case FAIKIN_MODE_AUTO: matter_mode = 1; break;
             case FAIKIN_MODE_COOL: matter_mode = 3; break;
             case FAIKIN_MODE_HEAT: matter_mode = 4; break;
+            case FAIKIN_MODE_FAN:  matter_mode = 7; break;
+            case FAIKIN_MODE_DRY:  matter_mode = 8; break;
             default: matter_mode = 1; break;
         }
     }
     val = esp_matter_enum8(matter_mode);
     esp_matter::attribute::report(ac_endpoint_id, Thermostat::Id, Thermostat::Attributes::SystemMode::Id, &val);
 
-    // Running state (0=Idle, bit0=Heat, bit1=Cool).
-    uint16_t running_state = 0;
-    if (data->state.power) {
-        if (data->state.mode == FAIKIN_MODE_HEAT && data->state.current_temp < data->state.target_temp) {
-            running_state = 1;
-        } else if (data->state.mode == FAIKIN_MODE_COOL && data->state.current_temp > data->state.target_temp) {
-            running_state = 2;
-        }
-    }
-    val = esp_matter_bitmap16(running_state);
+    val = esp_matter_bitmap16(running_state_from(data->state));
     esp_matter::attribute::report(ac_endpoint_id, Thermostat::Id, Thermostat::Attributes::ThermostatRunningState::Id, &val);
 
     // Fan Control — mirror Daikin fan speed into Matter.
@@ -221,6 +238,15 @@ static void s21_state_change_callback(const ac_state_t *state)
     }
 }
 
+// Matter has separate heat and cool setpoints, but the AC only has one target.
+static void apply_stored_setpoint(uint32_t attribute_id)
+{
+    esp_matter_attr_val_t stored = esp_matter_invalid(nullptr);
+    if (esp_matter::attribute::get_val(ac_endpoint_id, Thermostat::Id, attribute_id, &stored) == ESP_OK) {
+        s21.SetTemp(MATTER_TO_FLOAT(stored.val.i16));
+    }
+}
+
 static esp_err_t app_driver_thermostat_set_value(esp_matter_attr_val_t *val, uint32_t attribute_id)
 {
     ac_state_t current = s21.GetState();
@@ -233,17 +259,30 @@ static esp_err_t app_driver_thermostat_set_value(esp_matter_attr_val_t *val, uin
             if (!current.power) {
                 s21.SetPower(true);
             }
-            if (mode == 1) s21.SetMode(FAIKIN_MODE_AUTO);
-            else if (mode == 3) s21.SetMode(FAIKIN_MODE_COOL);
-            else if (mode == 4) s21.SetMode(FAIKIN_MODE_HEAT);
+            if (mode == 1) {
+                s21.SetMode(FAIKIN_MODE_AUTO);
+            } else if (mode == 3) {
+                s21.SetMode(FAIKIN_MODE_COOL);
+                apply_stored_setpoint(Thermostat::Attributes::OccupiedCoolingSetpoint::Id);
+            } else if (mode == 4) {
+                s21.SetMode(FAIKIN_MODE_HEAT);
+                apply_stored_setpoint(Thermostat::Attributes::OccupiedHeatingSetpoint::Id);
+            } else if (mode == 7) {
+                s21.SetMode(FAIKIN_MODE_FAN);
+            } else if (mode == 8) {
+                s21.SetMode(FAIKIN_MODE_DRY);
+            }
         }
     }
     else if (attribute_id == Thermostat::Attributes::OccupiedCoolingSetpoint::Id ||
              attribute_id == Thermostat::Attributes::OccupiedHeatingSetpoint::Id) {
-        if (current.power) {
+        // While on, only the setpoint for the current mode applies. Dry and Fan have none.
+        // While off, or in Auto where the AC has a single target, the latest write wins.
+        bool is_heat = (attribute_id == Thermostat::Attributes::OccupiedHeatingSetpoint::Id);
+        if (!current.power || current.mode == FAIKIN_MODE_AUTO ||
+            (current.mode == FAIKIN_MODE_HEAT && is_heat) ||
+            (current.mode == FAIKIN_MODE_COOL && !is_heat)) {
             s21.SetTemp(MATTER_TO_FLOAT(val->val.i16));
-        } else {
-            ESP_LOGI(TAG, "Ignored SetTemp because device is OFF");
         }
     }
     return ESP_OK;

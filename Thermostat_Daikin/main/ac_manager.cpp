@@ -17,6 +17,7 @@ ACManager::ACManager()
     m_default_state.outside_temp = 0.0f;
     m_default_state.fan_speed = FAIKIN_FAN_AUTO;
     m_default_state.powerful = false;
+    m_default_state.compressor_on = -1;
     m_default_state.power_w = -1;
     m_default_state.energy_total_wh = -1;
     m_default_state.energy_cool_wh = -1;

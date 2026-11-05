@@ -21,10 +21,11 @@ static const char *TAG = "CN_WIRED_DRV";
 #define CNWIRED_DETECT_MS 5000
 // Per-poll listen budget once connected (the unit broadcasts ~once/second).
 #define CNWIRED_POLL_MS   3000
+// How many polls in a row can pass without a valid packet before the link counts as lost.
+#define CNWIRED_LINK_LOST_POLLS 3
 
 // ---- FAIKIN <-> CN_WIRED mode/fan mapping ----
-// (Upstream's cnw_encode/decode helpers aren't in the shared header, so the
-//  mappings live here, derived from the CNW_* constants in cn_wired.h.)
+// CN_WIRED has three fan speeds, mapped to levels 1, 3 and 5 as upstream does.
 
 static int8_t cnw_decode_mode(const uint8_t *payload) {
     switch (payload[CNW_MODE_OFFSET] & CNW_MODE_MASK) {
@@ -55,8 +56,8 @@ static int8_t cnw_decode_fan(const uint8_t *packet) {
         case CNW_FAN_AUTO:  return FAIKIN_FAN_AUTO;
         case CNW_FAN_QUIET: return FAIKIN_FAN_QUIET;
         case CNW_FAN_1:     return FAIKIN_FAN_1;
-        case CNW_FAN_2:     return FAIKIN_FAN_2;
-        case CNW_FAN_3:     return FAIKIN_FAN_3;
+        case CNW_FAN_2:     return FAIKIN_FAN_3;
+        case CNW_FAN_3:     return FAIKIN_FAN_5;
         default:            return FAIKIN_FAN_INVALID; // e.g. CNW_FAN_POWERFUL
     }
 }
@@ -65,8 +66,8 @@ static uint8_t cnw_encode_fan(uint8_t faikin_fan) {
     switch (faikin_fan) {
         case FAIKIN_FAN_QUIET: return CNW_FAN_QUIET;
         case FAIKIN_FAN_1:     return CNW_FAN_1;
-        case FAIKIN_FAN_2:     return CNW_FAN_2;
-        case FAIKIN_FAN_3:
+        case FAIKIN_FAN_2:
+        case FAIKIN_FAN_3:     return CNW_FAN_2;
         case FAIKIN_FAN_4:
         case FAIKIN_FAN_5:     return CNW_FAN_3;
         default:               return CNW_FAN_AUTO;
@@ -74,7 +75,8 @@ static uint8_t cnw_encode_fan(uint8_t faikin_fan) {
 }
 
 DaikinCNWired::DaikinCNWired()
-    : m_connected(false), m_dirty(false), m_tx_pin(-1), m_rx_pin(-1), m_callback(nullptr) {
+    : m_connected(false), m_dirty(false), m_tx_pin(-1), m_rx_pin(-1), m_callback(nullptr),
+      m_swing(false), m_led(false), m_miss(0) {
     m_state.power = false;
     m_state.mode = FAIKIN_MODE_AUTO;
     m_state.target_temp = 20.0f;
@@ -82,6 +84,7 @@ DaikinCNWired::DaikinCNWired()
     m_state.outside_temp = 0.0f;
     m_state.fan_speed = FAIKIN_FAN_AUTO;
     m_state.powerful = false;
+    m_state.compressor_on = -1;
     m_state.power_w = -1;
     m_state.energy_total_wh = -1;
     m_state.energy_cool_wh = -1;
@@ -126,6 +129,8 @@ bool DaikinCNWired::ReadAndParse(int wait_ms) {
             int8_t fan = cnw_decode_fan(pkt);
             if (fan != FAIKIN_FAN_INVALID) m_state.fan_speed = fan;
             m_state.powerful = (pkt[CNW_FAN_OFFSET] == CNW_FAN_POWERFUL);
+            m_swing = (pkt[CNW_SPECIALS_OFFSET] & CNW_V_SWING) != 0;
+            m_led = (pkt[CNW_SPECIALS_OFFSET] & CNW_LED_ON) != 0;
             break;
         }
         default:
@@ -154,8 +159,9 @@ void DaikinCNWired::SendModes() {
     buf[2] = 0x50;
     buf[CNW_MODE_OFFSET] = cnw_encode_mode(m_state.mode, m_state.power);
     buf[CNW_FAN_OFFSET] = fan;
-    buf[CNW_SPECIALS_OFFSET] = 0;
-    buf[6] = 0x10;
+    // Upstream found these swing values by experiment: the CNW_V_SWING bit alone doesn't work.
+    buf[CNW_SPECIALS_OFFSET] = (m_swing ? 0x70 : 0) | (m_led ? CNW_LED_ON : 0);
+    buf[6] = m_swing ? 0x11 : 0x10;
     buf[CNW_CRC_TYPE_OFFSET] = CNW_COMMAND;
     buf[CNW_CRC_TYPE_OFFSET] = cnw_checksum(buf);
 
@@ -172,9 +178,19 @@ bool DaikinCNWired::Detect() {
 
 void DaikinCNWired::Poll() {
     // Receive whatever the unit broadcast this cycle.
-    ReadAndParse(CNWIRED_POLL_MS);
-    // CN_WIRED devices expect the controller to echo modes back; send after rx.
-    if (m_dirty) {
+    if (!ReadAndParse(CNWIRED_POLL_MS)) {
+        if (++m_miss >= CNWIRED_LINK_LOST_POLLS) {
+            ESP_LOGW(TAG, "CN_WIRED unit went quiet");
+            m_miss = 0;
+            m_connected = false;   // the manager re-detects the protocol
+        }
+        return;
+    }
+    m_miss = 0;
+    // The packet above may be old, so wait for a fresh one. Send 20 ms after it, as upstream
+    // does, so its trailing pulse has passed and we don't talk over the unit.
+    if (m_dirty && ReadAndParse(CNWIRED_POLL_MS)) {
+        vTaskDelay(pdMS_TO_TICKS(20));
         SendModes();
     }
 }

@@ -26,6 +26,7 @@ DaikinX50A::DaikinX50A()
     m_state.outside_temp = 0.0f;
     m_state.fan_speed = FAIKIN_FAN_AUTO;
     m_state.powerful = false;
+    m_state.compressor_on = -1;
     m_state.power_w = -1;
     m_state.energy_total_wh = -1;
     m_state.energy_cool_wh = -1;

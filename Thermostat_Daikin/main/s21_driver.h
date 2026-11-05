@@ -40,6 +40,11 @@ private:
     bool m_rg_supported;          // set false if the unit doesn't answer RG
     bool m_rg_fan_valid;          // RG gives a usable fan setting, so ignore G1's
     int m_rg_miss;                // consecutive RG polls with no answer
+    bool m_rd_supported;          // set false if the unit doesn't answer Rd
+    int m_rd_miss;                // consecutive Rd polls with no answer
+    uint8_t m_g6[4];              // last G6 payload, so D6 can keep the other settings
+    bool m_g6_valid;
+    int m_link_miss;              // consecutive F1 polls with no answer
     s21_state_change_cb_t m_callback;
     bool m_energy_supported;   // set false if the unit NAKs the energy queries
     int m_energy_miss;         // consecutive cycles with no energy response
@@ -50,6 +55,8 @@ private:
     void ParseSettingsG6(uint8_t *payload, int len);
     void ParseFanSG(uint8_t *payload, int len);     // RG -> fan setting
     void UpdateFanFromAC(uint8_t fan);
+    void ParseCompressorSd(uint8_t *payload, int len); // Rd -> compressor speed
+    void PollOptional(uint8_t cmd2, bool &supported, int &miss);
     void ParseSensorsGH(uint8_t *payload, int len);
     void ParseSensorsG9(uint8_t *payload, int len);
     void ParseSensorsSH(uint8_t *payload, int len);
