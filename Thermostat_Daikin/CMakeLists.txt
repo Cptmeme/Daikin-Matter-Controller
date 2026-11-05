@@ -19,6 +19,8 @@ if(NOT DEFINED ENV{ESP_MATTER_DEVICE_PATH})
         set(ENV{ESP_MATTER_DEVICE_PATH} $ENV{ESP_MATTER_PATH}/device_hal/device/esp32s3_devkit_c)
     elseif("${IDF_TARGET}" STREQUAL "esp32c6")
         set(ENV{ESP_MATTER_DEVICE_PATH} $ENV{ESP_MATTER_PATH}/device_hal/device/esp32c6_devkit_c)
+    elseif("${IDF_TARGET}" STREQUAL "esp32c5")
+        set(ENV{ESP_MATTER_DEVICE_PATH} $ENV{ESP_MATTER_PATH}/device_hal/device/esp32c5_devkit_c)
     else()
         message(FATAL_ERROR "Unsupported IDF_TARGET")
     endif()
@@ -70,3 +72,5 @@ idf_build_set_property(C_COMPILE_OPTIONS "-Os" APPEND)
 # For RISCV chips, project_include.cmake sets -Wno-format, but does not clear various
 # flags that depend on -Wformat
 idf_build_set_property(COMPILE_OPTIONS "-Wno-format-nonliteral;-Wno-format-security" APPEND)
+# Keep the SDK's location on this computer out of the binaries, which get published
+idf_build_set_property(COMPILE_OPTIONS "-fmacro-prefix-map=${ESP_MATTER_PATH}=/esp-matter" APPEND)

@@ -123,9 +123,26 @@ static bool s_reporting_fan = false;
 // Global Temperature Storage
 int16_t g_current_temp_int = 2100; 
 
+// Pins per chip, read from each board's PCB files. Change these if your wiring differs.
+#if CONFIG_IDF_TARGET_ESP32C6        // Custom PCB with a WT0132C6-S5
 #define S21_TX_PIN 21
 #define S21_RX_PIN 20
 #define BUTTON_GPIO_PIN 23
+#elif CONFIG_IDF_TARGET_ESP32C5      // Custom PCB with an ESPC5-12. GPIO 14 is also USB D+, which it takes over
+#define S21_TX_PIN 10
+#define S21_RX_PIN 9
+#define BUTTON_GPIO_PIN 14
+#elif CONFIG_IDF_TARGET_ESP32S3      // Faikout: the button is the Reset header
+#define S21_TX_PIN 48
+#define S21_RX_PIN 34
+#define BUTTON_GPIO_PIN 21
+#elif CONFIG_IDF_TARGET_ESP32        // Faikin with a PICO-MINI-02: no button, GPIO 0 is on the programming header
+#define S21_TX_PIN 26
+#define S21_RX_PIN 27
+#define BUTTON_GPIO_PIN 0
+#else
+#error "Set the S21 and button pins for this chip"
+#endif
 
 #define FLOAT_TO_MATTER(x) ((int16_t)((x) * 100.0f))
 #define MATTER_TO_FLOAT(x) ((float)(x) / 100.0f)

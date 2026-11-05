@@ -19,21 +19,22 @@ Open source Matter firmware for Daikin split air conditioners with an S21 port. 
 
 This repo has two firmwares. Pick one based on your board:
 
-| | Thread firmware | Faikout Matter |
+| | Original firmware | Faikout Matter |
 |---|---|---|
-| **Choose it if** | You want Thread and have a Thread Border Router | You have a Faikin or Faikout board, or want Faikout's features |
-| **Network** | Thread | Wi-Fi |
-| **Board** | The custom ESP32-C6 board in this repo | Faikin and Faikout boards with an ESP32-PICO-MINI-02 or ESP32-S3, or the custom board with a C6 or C5 module |
+| **Choose it if** | You just want Matter on your AC, over Thread or Wi-Fi | You want to keep Faikout's features as well |
+| **Network** | Thread or Wi-Fi, depending on the image | Wi-Fi, or Ethernet on boards that have it |
+| **Board** | The custom PCB in this repo, Faikout boards and older Faikin boards | The same, plus FaikoutETH and FaikoutPOE |
 | **What it is** | Its own firmware, using Faikout's S21 protocol code | The original Faikout firmware, with Matter support added |
 | **Also has** | Matter only | Everything in Faikout: web interface, MQTT, Home Assistant discovery and BLE sensors |
 | **Pairing** | Over BLE | Over your network |
 | **Updates** | Matter OTA | Faikout's own updates |
+| **Pre-built images** | [Yes](#pre-built-binaries) | No, build it yourself |
 | **Folder** | [`Thermostat_Daikin`](Thermostat_Daikin) | [`Faikout_Matter`](Faikout_Matter) |
-| **Status** | Running on real ACs | **Not tested on hardware yet** |
+| **Status** | Thread on the WT0132C6 runs on real ACs. **The other images are unverified** | Boots and pairs on a PICO board, but **not yet tested with an AC** |
 
 Faikout Matter has [its own README](Faikout_Matter/README.md). It's AI-assisted code and won't be merged into the original Faikout repo, because the Faikout project doesn't accept AI-based bug reports or merge requests.
 
-Unless a section says otherwise, the rest of this page covers the Thread firmware.
+Unless a section says otherwise, the rest of this page covers the original firmware.
 
 ---
 
@@ -41,8 +42,9 @@ Unless a section says otherwise, the rest of this page covers the Thread firmwar
 
 - [Firmware options](#firmware-options)
 - [Faikout Matter](Faikout_Matter/README.md) (separate README)
-- **Thread firmware**
+- **Original firmware**
   - [Quick Start](#quick-start)
+  - [Pre-built binaries](#pre-built-binaries)
   - [Features](#features)
   - [Compatible Hubs](#compatible-hubs)
   - [Hardware](#hardware)
@@ -64,7 +66,7 @@ Unless a section says otherwise, the rest of this page covers the Thread firmwar
 
 ## Quick Start
 
-**You'll be building from source — there are no pre-built binaries (see [Building & Flashing](#building--flashing) for why).**
+**If your board is listed under [Pre-built binaries](#pre-built-binaries), you can flash one of those. Otherwise, build from source:**
 
 1. Install ESP-IDF and ESP-Matter — follow Espressif's [Getting the Repositories](https://docs.espressif.com/projects/esp-matter/en/latest/esp32/developing.html) guide.
 2. Connect your interface board to the Daikin's S21 port — see [Hardware](#hardware).
@@ -74,11 +76,47 @@ Unless a section says otherwise, the rest of this page covers the Thread firmwar
 
 ---
 
+## Pre-built binaries
+
+> ⚠️ **These binaries are not verified.** Only `thread-c6` has run on a real AC. The others have only been compiled, because I don't have most of these boards to test them on. Expect problems, and back up your board's flash first.
+
+Download them from [Releases](../../releases).
+
+| Image | Board | Network | S21 TX / RX | Button | Tested |
+|---|---|---|---|---|---|
+| `thread-c6` | Custom PCB with a WT0132C6-S5 | Thread | GPIO 21 / 20 | GPIO 23 | ✅ On real ACs |
+| `wifi-c6` | Custom PCB with a WT0132C6-S5 | Wi-Fi | GPIO 21 / 20 | GPIO 23 | ❌ |
+| `thread-c5` | Custom PCB with an ESPC5-12 | Thread | GPIO 10 / 9 | GPIO 14 | ❌ |
+| `wifi-c5` | Custom PCB with an ESPC5-12 | Wi-Fi | GPIO 10 / 9 | GPIO 14 | ❌ |
+| `wifi-s3` | Faikout, and the Faikin+, Faikin2 and final Faikin S3 boards | Wi-Fi | GPIO 48 / 34 | GPIO 21 (Reset header) | ❌ |
+| `wifi-pico` | Faikin with an ESP32-PICO-MINI-02 | Wi-Fi | GPIO 26 / 27 | GPIO 0 (programming header) | ❌ |
+
+The pins come from each board's PCB files. These boards won't work with any image:
+
+- **Faikin3 with an ESP32-S3:** S21 is on GPIO 47 and 21.
+- **FaikoutETH and FaikoutPOE:** this firmware has no Ethernet, and the POE board also needs a load pin driven. Use [Faikout Matter](Faikout_Matter/README.md).
+- **FaikoutIR:** it has no S21 port.
+
+Each image comes as two files, and `SHA256SUMS` lists their checksums:
+
+- **`-full.bin`** is for flashing over serial. It replaces everything up to the end of the app, **including your pairings and Wi-Fi details**:
+
+  ```bash
+  esptool.py --chip esp32c6 -p <PORT> write_flash 0x0 daikin-matter-1.6-thread-c6-full.bin
+  ```
+
+  Use `esp32c6`, `esp32c5`, `esp32s3` or `esp32` for `--chip`, to match the board.
+- **`-ota.bin`** is for [updates over Matter](#over-the-air-matter-ota-over-thread). Only send a board the image it's already running. A Wi-Fi image sent to a board on Thread would take it off its network.
+
+The Wi-Fi images pair like any Matter device: your home app connects over BLE and passes on your Wi-Fi details.
+
+---
+
 ## Features
 
-Faikout Matter is built to offer the same Matter features over Wi-Fi, apart from the reset button and Matter OTA. It hasn't been tested on hardware yet.
+Faikout Matter is built to offer the same Matter features, apart from the reset button and Matter OTA. It hasn't been tested with an AC yet.
 
-- ✅ Matter over Thread — uses the ESP32-C6's 802.15.4 radio, no WiFi required
+- ✅ Matter over Thread — uses the chip's 802.15.4 radio, no WiFi required. Or Matter over Wi-Fi, depending on the image
 - ✅ Compatible with Apple Home, Google Home, Alexa, Home Assistant, etc.
 - ✅ Multi-fabric — commission to multiple hubs simultaneously (up to 5 fabrics, and Apple Home alone uses 2)
 - ✅ Native Room Air Conditioner tile (single accessory in your home app)
@@ -102,7 +140,7 @@ Faikout Matter is built to offer the same Matter features over Wi-Fi, apart from
 
 > **Requires a Thread Border Router.** A Thread Border Router is required for any Matter-over-Thread device.
 
-These results are for the Thread firmware. Faikout Matter doesn't need a Thread Border Router, and hasn't been tested with any of these yet.
+These results are for the original firmware on Thread. The Wi-Fi images and Faikout Matter don't need a Thread Border Router. They haven't been tested with these controllers, except that Faikout Matter has paired with a home app.
 
 | Ecosystem | Tested |
 |-----------|--------|
@@ -132,11 +170,11 @@ You need *something* between the ESP32-C6 and the Daikin's S21 port — the S21 
 Two interface options:
 
 1. **The reference PCB included in this repo, known to work end-to-end** — see the [`Custom PCB esp32c6/`](Custom%20PCB%20esp32c6/) folder. KiCad project + BOM. Built around a WT0132C6-S5, a BSS138 for level shifting, and a JST EH 5-way for the S21 connection. **Thread + Wi-Fi capable** thanks to the C6's 802.15.4 radio, and it can run either firmware. *Note: This board does not feature an onboard USB port. Flashing is done via exposed `RX0` and `TX0` headers using an external USB-to-Serial adapter, and the board is powered via the `V_in` pin, which accepts **4.5V to 17V** (the limits of its TPS562246 regulator, whose absolute maximum is 19V). The 12-14V from S21 pin 4 is well within that.*
-2. **A RevK [ESP32-Faikout](https://codeberg.org/RevK/ESP32-Faikout) or older Faikin board.** Use [Faikout Matter](Faikout_Matter/README.md) for these. It keeps Faikout's firmware and adds Matter. Faikout boards are sold by RevK and on Amazon UK — check the Faikout repo for current availability.
+2. **A RevK [ESP32-Faikout](https://codeberg.org/RevK/ESP32-Faikout) or older Faikin board.** Use [Faikout Matter](Faikout_Matter/README.md) to keep Faikout's firmware and add Matter, or the `wifi-s3` or `wifi-pico` [pre-built binary](#pre-built-binaries) of this firmware. Faikout boards are sold by RevK and on Amazon UK — check the Faikout repo for current availability.
 
-> **⚠️ Faikout boards = Matter over Wi-Fi only, and untested on real hardware.** Current Faikout PCBs use ESP32 / ESP32-S3 chips, neither of which has an 802.15.4 radio, so they can't use Thread and you lose its mesh / low-power benefits. A future Faikout revision based on the ESP32-C6 (or similar) would change this — track the Faikout repo if that matters to you.
+> **⚠️ Faikout boards = Matter over Wi-Fi only.** Current Faikout PCBs use ESP32 / ESP32-S3 chips, neither of which has an 802.15.4 radio, so they can't use Thread and you lose its mesh / low-power benefits. A future Faikout revision based on the ESP32-C6 (or similar) would change this — track the Faikout repo if that matters to you.
 >
-> The Thread firmware also builds for the ESP32-S3 (`idf.py set-target esp32s3`), where it runs Matter over Wi-Fi, but that build hasn't been run on a Faikout board. If you try it, set the pins in [`main/app_driver.cpp`](Thermostat_Daikin/main/app_driver.cpp) first: Faikout's own defaults for the S3 are GPIO 48 for TX and GPIO 34 for RX, and `BUTTON_GPIO_PIN` needs changing because GPIO 23 doesn't exist on the S3.
+> This firmware's Wi-Fi builds for these boards haven't been run on one yet. See [Pre-built binaries](#pre-built-binaries) for which boards their pins match.
 
 If you want to roll your own interface, use the included PCB as a reference rather than starting from scratch.
 
@@ -188,12 +226,12 @@ Hold the GPIO23 button for at least 5 seconds and then release it to trigger a M
 
 ## Pin configuration
 
-Unless your hardware matches the [included PCB](Custom%20PCB%20esp32c6/) exactly, you'll need to change the GPIO pin assignments to match your wiring before building. They're defined as preprocessor macros at the top of [`main/app_driver.cpp`](Thermostat_Daikin/main/app_driver.cpp):
+Unless your hardware matches a board under [Pre-built binaries](#pre-built-binaries), you'll need to change the GPIO pin assignments to match your wiring before building. They're defined per chip as preprocessor macros in [`main/app_driver.cpp`](Thermostat_Daikin/main/app_driver.cpp). For the ESP32-C6:
 
 ```c
-#define S21_TX_PIN       21   // ESP32 → S21 RX  (output)
-#define S21_RX_PIN       20   // ESP32 ← S21 TX  (input)
-#define BUTTON_GPIO_PIN  23   // factory-reset / commissioning button → GND
+#define S21_TX_PIN 21        // ESP32 → S21 RX  (output)
+#define S21_RX_PIN 20        // ESP32 ← S21 TX  (input)
+#define BUTTON_GPIO_PIN 23   // factory-reset / commissioning button → GND
 ```
 
 Pick GPIOs that are safe to use as general-purpose IO on your specific ESP32 variant (avoid strapping pins, JTAG pins, USB pins, etc.). For ESP32-C6 the [Espressif datasheet pinout table](https://www.espressif.com/sites/default/files/documentation/esp32-c6_datasheet_en.pdf) is the authoritative reference.
@@ -204,7 +242,7 @@ If you're using a board where the buttons or LEDs are on different pins than the
 
 ## Building & Flashing
 
-> **Why no pre-built binaries?** This firmware needs the GPIO pin assignments compiled in (see above). Unless you're using the exact PCB in this repo, the pre-built binary would have wrong pins for your wiring and either silently fail to talk to the AC or behave unpredictably. So you build from source.
+> **Do you need to build it?** This firmware has its GPIO pins compiled in (see above). If your board isn't listed under [Pre-built binaries](#pre-built-binaries), those images would have the wrong pins for your wiring, and could silently fail to talk to the AC. In that case, build from source.
 
 ### Hardware setup for flashing
 
@@ -282,6 +320,8 @@ idf.py -p <PORT> flash monitor
 ```
 
 Replace `<PORT>` with your serial port (`/dev/cu.usbserial-XXXX` on macOS, `/dev/ttyUSB0` on Linux, `COM3` on Windows).
+
+To build all the pre-built images instead, install the tools for every chip with `./install.sh esp32,esp32s3,esp32c5,esp32c6` and run `./build_binaries.sh`. The results go in `binaries/`.
 
 > ⚠️ **Disconnect mains power at the breaker before opening the indoor unit.** The S21 port itself is logic-level and isolated from mains, but everything around it inside the cabinet is not. If you're not comfortable working inside an AC indoor unit, have a qualified technician install the cable for you and just plug into the S21 connector once it's accessible.
 
@@ -395,7 +435,8 @@ Faikout Matter has no Matter reset button. Remove the device in your home app in
 - [ ] **Swing / louver position** — the S21 protocol supports it; no Matter wiring yet.
 - [ ] **Econo, comfort, streamer and other S21 settings** — not exposed over Matter yet. Toggling Powerful leaves them as they are.
 - [x] **X50A & CN_WIRED protocols (experimental)** — drivers for both are built in, with boot-time auto-detection (S21 → X50A → CN_WIRED). **Only S21 is hardware-verified.** X50A rides the same 2-wire UART front-end and should work with the right cable; CN_WIRED is a single-wire pulse protocol that needs a different connector/pull-up. RevK's wiring wiki notes that the CN_WIRED power pin can be above 12V without giving a figure, so measure it first: the included PCB is limited to 17V. Toggle them via `AC_ENABLE_X50A` / `AC_ENABLE_CNWIRED` in `Thermostat_Daikin/main/app_driver.cpp`.
-- [ ] **Faikout Matter** — first test on real hardware, then a unique pairing code for each board.
+- [ ] **Faikout Matter** — test with a real AC, then give each board a unique pairing code.
+- [ ] **Pre-built images** — test everything except `thread-c6` on real hardware.
 
 ---
 
@@ -418,7 +459,7 @@ For Faikout Matter, the same settings are in [`Faikout_Matter/main/CHIPProjectCo
 
 GPL v3 — see [LICENSE](LICENSE)
 
-The S21 protocol implementation is derived from the [Faikout](https://codeberg.org/RevK/ESP32-Faikout) project by RevK, which is licensed under GPL v3 — that's why both firmwares are also GPL v3. The Thread firmware is combined with portions of the [ESP-Matter](https://github.com/espressif/esp-matter) thermostat example by Espressif Systems (Apache 2.0, which is GPL-compatible in this direction).
+The S21 protocol implementation is derived from the [Faikout](https://codeberg.org/RevK/ESP32-Faikout) project by RevK, which is licensed under GPL v3 — that's why both firmwares are also GPL v3. The original firmware is combined with portions of the [ESP-Matter](https://github.com/espressif/esp-matter) thermostat example by Espressif Systems (Apache 2.0, which is GPL-compatible in this direction).
 
 [Faikout Matter](Faikout_Matter/README.md) contains modified copies of Faikout and its framework. Its README lists the upstream versions and the changes.
 
@@ -426,7 +467,7 @@ The S21 protocol implementation is derived from the [Faikout](https://codeberg.o
 
 ## Matter and Thread Certification
 
-Neither firmware is Matter Certified or Thread Certified. Both implement the Matter protocol via Espressif's [esp-matter](https://github.com/espressif/esp-matter) SDK, and the Thread firmware implements Thread via OpenThread, but neither has been submitted to the Connectivity Standards Alliance (CSA) or Thread Group for certification. Certification requires CSA membership ($7,000+/year) and Authorized Test Lab evaluation, which are out of scope for an open-source community project.
+Neither firmware is Matter Certified or Thread Certified. Both implement the Matter protocol via Espressif's [esp-matter](https://github.com/espressif/esp-matter) SDK, and the original firmware's Thread images use OpenThread, but neither has been submitted to the Connectivity Standards Alliance (CSA) or Thread Group for certification. Certification requires CSA membership ($7,000+/year) and Authorized Test Lab evaluation, which are out of scope for an open-source community project.
 
 Devices flashed with either firmware will appear in Matter ecosystems as **uncertified Matter devices**. Most ecosystems show a one-time warning during commissioning ("Add Anyway" in Apple Home); this is normal and expected.
 
@@ -442,13 +483,13 @@ Contributions are welcome. This is a solo-maintained project, so response times 
 
 ### Testing without an AC
 
-`Thermostat_Daikin/test/s21_sim/run.sh` runs the Thread firmware's real S21 driver against a simulated AC on your computer. It needs only a C++ compiler, not ESP-IDF or any hardware, and finishes instantly, so run it after changing `s21_driver.cpp`. The simulated AC is only a model of how a unit behaves, so still test on a real AC before relying on a change.
+`Thermostat_Daikin/test/s21_sim/run.sh` runs the original firmware's real S21 driver against a simulated AC on your computer. It needs only a C++ compiler, not ESP-IDF or any hardware, and finishes instantly, so run it after changing `s21_driver.cpp`. The simulated AC is only a model of how a unit behaves, so still test on a real AC before relying on a change.
 
 ### Reporting bugs
 
 Open a [GitHub issue](../../issues/new) with the details below. Report Faikout Matter problems here too, not to the Faikout project.
 
-- **Firmware:** Thread firmware or Faikout Matter
+- **Firmware:** the original firmware (which image) or Faikout Matter
 - **Hardware:** Board variant, S21 interface design (optocoupler / FET / which PCB), and Daikin model number
 - **Ecosystem:** Apple Home, Google Home, Alexa, Home Assistant, etc., and any Thread Border Router(s) on your network
 - **What happened:** What you expected, what actually occurred, and steps to reproduce
@@ -472,7 +513,7 @@ Meanwhile, most modern Daikin split units ship with an **S21 service port** sitt
 
 ### Why Matter over Thread?
 
-Matter over Thread offers lower power consumption, lower latency, and a mesh that doesn't depend on your WiFi. Thread devices use any compatible Thread Border Router (HomePod mini, Apple TV 4K, iPhone 15 Pro+, Nest Hub 2nd gen, HA SkyConnect/Yellow) and continue to function even if your WiFi is down or congested. The ESP32-C6 has both a WiFi 6 radio and an 802.15.4 Thread radio — the Thread firmware uses the Thread radio so the WiFi stack can stay quiet.
+Matter over Thread offers lower power consumption, lower latency, and a mesh that doesn't depend on your WiFi. Thread devices use any compatible Thread Border Router (HomePod mini, Apple TV 4K, iPhone 15 Pro+, Nest Hub 2nd gen, HA SkyConnect/Yellow) and continue to function even if your WiFi is down or congested. The ESP32-C6 has both a WiFi 6 radio and an 802.15.4 Thread radio — the Thread images use the Thread radio so the WiFi stack can stay quiet.
 
 ### Why Matter, and not Faikin / ESPHome / Tasmota?
 

@@ -4,6 +4,13 @@ managed_components/
 sdkconfig
 sdkconfig.old
 
+# Pre-built images, which are published as release downloads rather than kept in git,
+# and their build folders and configs
+Thermostat_Daikin/binaries/
+Thermostat_Daikin/build-*/
+Thermostat_Daikin/sdkconfig.thread-*
+Thermostat_Daikin/sdkconfig.wifi-*
+
 # Editor and OS files
 .vscode/
 .DS_Store

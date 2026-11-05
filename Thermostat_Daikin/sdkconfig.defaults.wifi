@@ -1,0 +1,16 @@
+# Matter over Wi-Fi. Used by the wifi-* images, and loaded last so it also undoes the Thread settings
+# in sdkconfig.defaults.esp32c6. Pairing happens over BLE, which also passes on the Wi-Fi details.
+CONFIG_OPENTHREAD_ENABLED=n
+CONFIG_ENABLE_WIFI_STATION=y
+CONFIG_ENABLE_WIFI_AP=n
+
+CONFIG_LWIP_IPV6_AUTOCONFIG=y
+CONFIG_LWIP_IPV6_NUM_ADDRESSES=6
+
+CONFIG_USE_MINIMAL_MDNS=y
+CONFIG_ENABLE_EXTENDED_DISCOVERY=n
+
+# BLE is only needed for pairing here, so free its memory afterwards
+CONFIG_USE_BLE_ONLY_FOR_COMMISSIONING=y
+
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
