@@ -2,11 +2,11 @@
 
 > **⚠️ Not tested on hardware yet.** This firmware compiles and links for the boards below, but it has never been booted or paired. Keep a backup of your board's flash before trying it, and expect problems.
 
-Faikout Matter functions just as the original [Faikout firmware](https://codeberg.org/RevK/ESP32-Faikout) by RevK, but adds Matter support over Wi-Fi. It runs on Faikin and Faikout boards, and keeps what Faikout already does: the web interface, MQTT, Home Assistant discovery, BLE sensors and updates over Wi-Fi.
+Faikout Matter functions just as the original [Faikout firmware](https://codeberg.org/RevK/ESP32-Faikout) by RevK, but adds Matter support over Wi-Fi. It runs on Faikin and Faikout boards and on the custom PCB in this repo, and keeps what Faikout already does: the web interface, MQTT, Home Assistant discovery, BLE sensors and updates over Wi-Fi.
 
 Apart from adding Matter, it differs from the original in three ways: Ethernet boards aren't supported, it's built with ESP-IDF 5.5 rather than 6, and it doesn't download updates from RevK's server.
 
-It's part of [Daikin Matter Controller](../README.md). For a custom ESP32-C6 board on Thread, use the Thread firmware there instead.
+It's part of [Daikin Matter Controller](../README.md). To use the custom PCB on Thread, use the Thread firmware there instead.
 
 This is an independent modified version, not affiliated with or supported by RevK. It won't be merged into the original Faikout repo: it's AI-assisted code, and the Faikout project doesn't accept AI-based bug reports or merge requests. Please report problems [here](https://github.com/Cptmeme/Daikin-Matter-Controller/issues), not to the Faikout project.
 
@@ -17,14 +17,48 @@ This is an independent modified version, not affiliated with or supported by Rev
 | `pico` | Older Faikin boards | ESP32-PICO-MINI-02 | 8 MB | 2 MB |
 | `n4r2` | Current Faikout boards | ESP32-S3-MINI-N4R2 | 4 MB | 2 MB |
 | `n8` | Boards using stock firmware `S3-MINI-N8` | ESP32-S3-MINI-N8 | 8 MB | None |
+| `c6` | The [custom PCB](../Custom%20PCB%20esp32c6) in this repo | WT0132C6-S5 (ESP32-C6) | 4 MB | None |
+| `c5` | The custom PCB with an ESPC5-12 module instead | ESPC5-12 (ESP32-C5) | 4 MB | None |
 
-Ethernet boards (FaikoutETH, FaikoutPOE) aren't supported. There's no Thread on any of these boards, because they have no Thread radio.
+Ethernet boards (FaikoutETH, FaikoutPOE) aren't supported. This firmware doesn't use Thread on any board, including the C6 and C5.
 
 The `pico` build needs chip revision 3 or newer, the same as stock Faikout. To check your board:
 
 ```bash
 esptool.py -p /dev/ttyUSB0 flash_id
 ```
+
+### The custom PCB
+
+| | `c6` | `c5` |
+|---|---|---|
+| **S21 TX** | GPIO 21 | GPIO 10 |
+| **S21 RX** | GPIO 20 | GPIO 9 |
+| **Button** | GPIO 23 | GPIO 14 |
+
+These builds differ from the other boards in a few ways:
+
+- **Button:** it works as on Faikout. Press once to restart, twice to start an update, and 3 times to erase the settings, including Wi-Fi and Matter pairings. It doesn't open pairing as it does on the Thread firmware, so use the Matter page.
+- **Console:** logs go to the `RX0` and `TX0` header, because the board has no USB port. It has no status LED.
+- **Size:** some code is left out so they fit in 4 MB. See [below](#whats-left-out-of-the-c6-and-c5-images).
+- **Switching firmware:** moving a board between this and the Thread firmware takes a serial flash, because the partition layouts differ. Pair it again afterwards.
+
+On the `c5` board, GPIO 14 is also the USB D+ pin, so test the button first. The ESPC5-12's ground pad also stays unsoldered, because the PCB's footprint doesn't have one, and the S21 vias overlap the edge of that pad. Check `RX1` and `TX1` to GND with a meter after soldering.
+
+### What's left out of the `c6` and `c5` images
+
+These two images have parts stripped out so they fit in 4 MB of flash. This shouldn't break anything, because Faikout doesn't use these parts, but that comes from reading the code and hasn't been tested on hardware yet. The `pico`, `n4r2` and `n8` images aren't affected.
+
+| Left out | Why it shouldn't matter |
+|---|---|
+| BLE connections, BLE 5 features and BLE services | Faikout only scans for sensors and advertises, and that stays |
+| Enterprise Wi-Fi, OWE, SAE-PK, and WPA3 on the setup access point | Faikout has no settings for them. WPA2 and WPA3 on your own network stay |
+| TLS server, DTLS, pre-shared keys and static ECDH key exchange | Faikout only connects out, for MQTT and updates. TLS 1.2 with ECDHE or RSA stays, and so do client certificates and the CA bundle |
+| The P-192, P-224, P-521, secp256k1 and Brainpool curves | P-256, P-384 and Curve25519 stay. The one case that would fail is a server whose certificate uses a removed curve |
+| Assert messages, error names and TLS error text | Logs get less detailed, but nothing changes in how the firmware behaves |
+| The `esp_secure_cert` and `fctry` partitions | This firmware doesn't use them |
+
+The full list is in [`sdkconfig.defaults.matter-small`](sdkconfig.defaults.matter-small) and [`partitions_4m_matter.csv`](partitions_4m_matter.csv).
 
 ## How it works
 
@@ -36,7 +70,7 @@ Matter commands go through the same functions as Faikout's web interface and MQT
 
 ## Building
 
-Set up ESP-IDF, esp-matter and the SDK patch as in the [main README](../README.md#building--flashing), but install ESP-IDF's tools for these chips with `./install.sh esp32,esp32s3`. You also need `popt`, for Faikout's settings generator:
+Set up ESP-IDF, esp-matter and the SDK patch as in the [main README](../README.md#building--flashing), but install ESP-IDF's tools for these chips with `./install.sh esp32,esp32s3,esp32c5,esp32c6`. You also need `popt`, for Faikout's settings generator:
 
 ```bash
 brew install popt              # macOS
@@ -81,8 +115,8 @@ Faikout's own update feature stays, but the update server is left empty, so this
 - **Pairing code:** every board uses the same SDK test code, `3497-011-2332`. Anyone on your network can pair while pairing is open, so only open it when you need it.
 - **Certification:** it uses SDK test credentials, so home apps show the device as uncertified. It's for personal use only.
 - **Changing Wi-Fi:** change networks in Faikout's settings, not through a Matter controller.
-- **Flash space:** the `n4r2` and `n8` builds have only about 12 KB and 16 KB left before they outgrow the update slot. `pico` has about 87 KB.
-- **Memory:** `n8` has no PSRAM, so it may run short of RAM, especially with BLE sensors. The Matter page shows free memory.
+- **Flash space:** these builds are close to outgrowing their update slots. `c5`, `n4r2` and `n8` have about 13 KB, 12 KB and 16 KB left, `c6` about 51 KB and `pico` about 87 KB.
+- **Memory:** `n8`, `c6` and `c5` have no PSRAM, so they may run short of RAM, especially with BLE sensors. The Matter page shows free memory.
 
 ## Origin and licence
 
@@ -98,8 +132,9 @@ This folder contains modified copies of these upstream versions:
 
 Changes made on 2026-11-05:
 
-- **Added:** `main/matter_bridge.cpp` and `.h`, `main/CHIPProjectConfig.h`, `build.sh`, the `sdkconfig.defaults.matter*` files and this README.
+- **Added:** `main/matter_bridge.cpp` and `.h`, `main/CHIPProjectConfig.h`, `build.sh`, `partitions_4m_matter.csv`, the `sdkconfig.defaults.matter*` files and this README.
 - **`main/Faikout.c`:** hooks for Matter, a `/matter` web page, and removal of a comment on line 3 aimed at AI tools.
-- **`main/settings.def`:** the `matter.enable` setting.
+- **`main/settings.def`:** the `matter.enable` setting, and the S21 pins of the custom PCB as the C5 and C6 defaults.
+- **`components/ESP32-RevK/settings.def`:** the custom PCB's button as the C5 and C6 default.
 - **`components/ESP32-RevK/revk.c`:** removed RevK's unfinished 2023 Matter workarounds, which turned off the setup access point and mDNS. Also made two event names that only exist in ESP-IDF 6 conditional.
 - **Build files:** builds with ESP-IDF 5.5, because esp-matter v1.5 doesn't support ESP-IDF 6. Dropped the `ksz8851snl` Ethernet driver, which needs ESP-IDF 6.

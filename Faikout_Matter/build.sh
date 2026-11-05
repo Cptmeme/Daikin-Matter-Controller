@@ -1,7 +1,7 @@
 #!/bin/sh
 # Build or flash this firmware for one board. See README.md.
 #
-#   ./build.sh <pico|n4r2|n8> [idf.py arguments]        default: build
+#   ./build.sh <pico|n4r2|n8|c6|c5> [idf.py arguments]  default: build
 #   ./build.sh pico -p /dev/ttyUSB0 flash monitor
 #
 # Set up ESP-IDF and esp-matter in this shell first.
@@ -13,7 +13,9 @@ board=$1
 case "$board" in
     pico)    target=esp32;   key=secure_boot_signing_key_ecdsa.pem ;;
     n4r2|n8) target=esp32s3; key=secure_boot_signing_key_rsa.pem ;;
-    *)       echo "Usage: $0 <pico|n4r2|n8> [idf.py arguments]" >&2; exit 1 ;;
+    c6)      target=esp32c6; key=secure_boot_signing_key_rsa.pem ;;
+    c5)      target=esp32c5; key=secure_boot_signing_key_rsa.pem ;;
+    *)       echo "Usage: $0 <pico|n4r2|n8|c6|c5> [idf.py arguments]" >&2; exit 1 ;;
 esac
 shift
 [ $# -gt 0 ] || set -- build

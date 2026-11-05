@@ -21,9 +21,9 @@ This repo has two firmwares. Pick one based on your board:
 
 | | Thread firmware | Faikout Matter |
 |---|---|---|
-| **Choose it if** | You're building the custom board and have a Thread Border Router | You have a Faikin or Faikout board, or want Faikout's features |
+| **Choose it if** | You want Thread and have a Thread Border Router | You have a Faikin or Faikout board, or want Faikout's features |
 | **Network** | Thread | Wi-Fi |
-| **Board** | The custom ESP32-C6 board in this repo | Faikin and Faikout boards with an ESP32-PICO-MINI-02 or ESP32-S3 |
+| **Board** | The custom ESP32-C6 board in this repo | Faikin and Faikout boards with an ESP32-PICO-MINI-02 or ESP32-S3, or the custom board with a C6 or C5 module |
 | **What it is** | Its own firmware, using Faikout's S21 protocol code | The original Faikout firmware, with Matter support added |
 | **Also has** | Matter only | Everything in Faikout: web interface, MQTT, Home Assistant discovery and BLE sensors |
 | **Pairing** | Over BLE | Over your network |
@@ -131,7 +131,7 @@ You need *something* between the ESP32-C6 and the Daikin's S21 port — the S21 
 
 Two interface options:
 
-1. **The reference PCB included in this repo, known to work end-to-end** — see the [`Custom PCB esp32c6/`](Custom%20PCB%20esp32c6/) folder. KiCad project + BOM. Built around a WT0132C6-S5, a BSS138 for level shifting, and a JST EH 5-way for the S21 connection. **Thread + Wi-Fi capable** thanks to the C6's 802.15.4 radio. *Note: This board does not feature an onboard USB port. Flashing is done via exposed `RX0` and `TX0` headers using an external USB-to-Serial adapter, and the board is powered via the `V_in` pin, which accepts **4.5V to 17V** (the limits of its TPS562246 regulator, whose absolute maximum is 19V). The 12-14V from S21 pin 4 is well within that.*
+1. **The reference PCB included in this repo, known to work end-to-end** — see the [`Custom PCB esp32c6/`](Custom%20PCB%20esp32c6/) folder. KiCad project + BOM. Built around a WT0132C6-S5, a BSS138 for level shifting, and a JST EH 5-way for the S21 connection. **Thread + Wi-Fi capable** thanks to the C6's 802.15.4 radio, and it can run either firmware. *Note: This board does not feature an onboard USB port. Flashing is done via exposed `RX0` and `TX0` headers using an external USB-to-Serial adapter, and the board is powered via the `V_in` pin, which accepts **4.5V to 17V** (the limits of its TPS562246 regulator, whose absolute maximum is 19V). The 12-14V from S21 pin 4 is well within that.*
 2. **A RevK [ESP32-Faikout](https://codeberg.org/RevK/ESP32-Faikout) or older Faikin board.** Use [Faikout Matter](Faikout_Matter/README.md) for these. It keeps Faikout's firmware and adds Matter. Faikout boards are sold by RevK and on Amazon UK — check the Faikout repo for current availability.
 
 > **⚠️ Faikout boards = Matter over Wi-Fi only, and untested on real hardware.** Current Faikout PCBs use ESP32 / ESP32-S3 chips, neither of which has an 802.15.4 radio, so they can't use Thread and you lose its mesh / low-power benefits. A future Faikout revision based on the ESP32-C6 (or similar) would change this — track the Faikout repo if that matters to you.

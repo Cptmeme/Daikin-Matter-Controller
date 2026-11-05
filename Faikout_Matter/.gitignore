@@ -3,6 +3,8 @@ build-*/
 sdkconfig.pico
 sdkconfig.n4r2
 sdkconfig.n8
+sdkconfig.c6
+sdkconfig.c5
 dependencies.lock
 .cache/
 

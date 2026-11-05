@@ -1,0 +1,11 @@
+# 4 MB boards with a RISC-V chip. The same as components/ESP32-RevK/partitions_4m.csv, but without
+# the esp_secure_cert and fctry partitions, which this firmware doesn't use. That gives each update
+# slot another 64 KB.
+# Name,   Type, SubType, Offset,  Size, Flags
+RevK,     data, nvs,     0x009000,0x004000,
+otadata,  data, ota,     0x00d000,0x002000,
+phy_init, data, phy,     0x00f000,0x001000,
+ota_0,	  0,    ota_0,   0x010000,0x1f0000,
+ota_1,	  0,    ota_1,   0x200000,0x1f0000,
+nvs,      data, nvs,     0x3F0000,0x00f000,
+nvs_key,  data, nvs_keys,0x3FF000,0x001000,

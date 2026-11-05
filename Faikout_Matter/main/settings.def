@@ -127,11 +127,16 @@ gpio	tx	-48								// Tx
 gpio	rx	-34								// Rx
 #else
 #ifdef  CONFIG_IDF_TARGET_ESP32C5
-gpio	tx	-26								// Tx
-gpio	rx	-25								// Rx
+gpio	tx	-10								// Tx
+gpio	rx	-9								// Rx
+#else
+#ifdef  CONFIG_IDF_TARGET_ESP32C6
+gpio	tx	-21								// Tx
+gpio	rx	-20								// Rx
 #else
 gpio	tx	-26								// Tx
 gpio	rx	-27								// Rx
+#endif
 #endif
 #endif
 

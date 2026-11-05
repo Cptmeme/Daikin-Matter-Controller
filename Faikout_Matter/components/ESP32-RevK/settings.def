@@ -31,6 +31,10 @@ u16	usbuptime	CONFIG_REVK_USBUPTIME	.revk			// USB  turns off after this many se
 #endif
 #ifdef  CONFIG_IDF_TARGET_ESP32S3
 gpio	factorygpio	CONFIG_REVK_GPIO_RESET	.revk			// Factory reset GPIO (press 3 times)
+#elif defined(CONFIG_IDF_TARGET_ESP32C6)
+gpio	factorygpio	-23			.revk			// Factory reset GPIO (press 3 times)
+#elif defined(CONFIG_IDF_TARGET_ESP32C5)
+gpio	factorygpio	-14			.revk			// Factory reset GPIO (press 3 times)
 #else
 gpio	factorygpio				.revk			// Factory reset GPIO (press 3 times)
 #endif
