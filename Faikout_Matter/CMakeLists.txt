@@ -16,7 +16,7 @@ set(PROJECT_VER_NUMBER 1)
 
 # An existing sdkconfig.<board> takes priority over these files: delete it after changing them.
 set(SDKCONFIG_DEFAULTS "sdkconfig.defaults;sdkconfig.defaults.matter;sdkconfig.defaults.matter-$ENV{FAIKOUT_BOARD}")
-if("$ENV{FAIKOUT_BOARD}" STREQUAL "c6" OR "$ENV{FAIKOUT_BOARD}" STREQUAL "c5")
+if("$ENV{FAIKOUT_BOARD}" MATCHES "^(c6|c5|eth|poe)$")
     list(APPEND SDKCONFIG_DEFAULTS "sdkconfig.defaults.matter-small")
 endif()
 

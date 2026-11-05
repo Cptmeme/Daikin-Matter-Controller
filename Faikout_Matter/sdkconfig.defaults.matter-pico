@@ -23,3 +23,6 @@ CONFIG_REVK_BUILD_SUFFIX="-S1-PICO-MT"
 # Keep Matter's own memory in PSRAM, so internal RAM stays free for Wi-Fi and BLE
 CONFIG_ESP_MATTER_MEM_ALLOC_MODE_EXTERNAL=y
 CONFIG_CHIP_MEM_ALLOC_MODE_EXTERNAL=y
+
+# Status LED, read from the PCB file: red, green and blue on a common-anode LED
+CONFIG_REVK_BLINK="-8 -19 -7"

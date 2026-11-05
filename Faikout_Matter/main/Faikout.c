@@ -3508,7 +3508,7 @@ web_matter (httpd_req_t *req)
    if (!matterenable)
       revk_web_send (req, "<p>Matter is turned off in the settings.</p>");
    else if (!info.started)
-      revk_web_send (req, "<p>Matter starts once Wi-Fi is connected.</p>");
+      revk_web_send (req, "<p>Matter starts once the network is connected.</p>");
    else
    {
       revk_web_send (req, "<p>Paired with %u controller%s.</p>", info.fabrics, info.fabrics == 1 ? "" : "s");

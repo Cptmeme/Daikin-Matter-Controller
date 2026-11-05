@@ -1,4 +1,4 @@
-# Size reductions for 4 MB boards with a RISC-V chip, where the image doesn't fit otherwise.
+# Size reductions for the c6, c5, eth and poe builds, whose images don't fit otherwise.
 # None of these removes something Faikout uses.
 
 # Shorter error messages, and smaller function entry and exit code

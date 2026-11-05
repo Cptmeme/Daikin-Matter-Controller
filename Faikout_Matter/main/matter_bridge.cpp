@@ -17,6 +17,7 @@
 #include <esp_matter.h>
 
 #include <app/server/CommissioningWindowManager.h>
+#include <app/server/Dnssd.h>
 #include <app/server/Server.h>
 #include <lib/support/Span.h>
 #include <platform/CHIPDeviceLayer.h>
@@ -443,10 +444,38 @@ static bool create_data_model()
     return true;
 }
 
-// Faikout's framework brings up and reconnects Wi-Fi. Waiting until the station is on the network
-// means the SDK's first look at Wi-Fi finds it connected, so it never tries to connect by itself.
-static bool station_ready()
+#ifdef CONFIG_REVK_ETHERNET
+// The SDK is built for Wi-Fi and only follows its addresses, so tell it when Ethernet's change.
+static void restart_dnssd_on_chip_task(intptr_t)
 {
+    chip::app::DnssdServer::Instance().StartServer();
+}
+
+static void ethernet_address_event(void *, esp_event_base_t, int32_t id, void *data)
+{
+    if (id == IP_EVENT_GOT_IP6 &&
+        strcmp(esp_netif_get_ifkey(static_cast<ip_event_got_ip6_t *>(data)->esp_netif), "ETH_DEF") != 0) {
+        return;
+    }
+    if (s_started) {
+        PlatformMgr().ScheduleWork(restart_dnssd_on_chip_task, 0);
+    }
+}
+#endif
+
+// Faikout's framework brings up and reconnects the network. Waiting until it's up means the SDK's
+// first look at Wi-Fi finds it connected, so it never tries to connect by itself.
+static bool network_ready()
+{
+#ifdef CONFIG_REVK_ETHERNET
+    // The framework adds Ethernet's link-local address itself and doesn't mark it preferred, so
+    // esp_netif_get_ip6_linklocal() below wouldn't see it.
+    esp_netif_t *ethernet = esp_netif_get_handle_from_ifkey("ETH_DEF");
+    esp_ip6_addr_t addresses[CONFIG_LWIP_IPV6_NUM_ADDRESSES];
+    if (ethernet && esp_netif_is_netif_up(ethernet) && esp_netif_get_all_ip6(ethernet, addresses) > 0) {
+        return true;
+    }
+#endif
     esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
     if (!netif) {
         return false;
@@ -472,10 +501,10 @@ static void hand_wifi_to_app_on_chip_task(intptr_t context)
 
 static void matter_task(void *)
 {
-    while (!station_ready()) {
+    while (!network_ready()) {
         vTaskDelay(pdMS_TO_TICKS(500));
     }
-    ESP_LOGE(TAG, "Wi-Fi is up, starting. Free heap %u", static_cast<unsigned>(esp_get_free_heap_size()));
+    ESP_LOGE(TAG, "Network is up, starting. Free heap %u", static_cast<unsigned>(esp_get_free_heap_size()));
 
     if (!create_data_model()) {
         ESP_LOGE(TAG, "Failed to create the data model");
@@ -490,6 +519,10 @@ static void matter_task(void *)
     }
     PlatformMgr().ScheduleWork(hand_wifi_to_app_on_chip_task, static_cast<intptr_t>(s_ac_endpoint));
     s_started = true;
+#ifdef CONFIG_REVK_ETHERNET
+    esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, ethernet_address_event, nullptr);
+    esp_event_handler_register(IP_EVENT, IP_EVENT_GOT_IP6, ethernet_address_event, nullptr);
+#endif
     ESP_LOGE(TAG, "Started. Free heap %u", static_cast<unsigned>(esp_get_free_heap_size()));
     vTaskDelete(nullptr);
 }

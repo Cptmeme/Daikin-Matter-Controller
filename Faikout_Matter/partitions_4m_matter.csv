@@ -1,4 +1,4 @@
-# 4 MB boards with a RISC-V chip. The same as components/ESP32-RevK/partitions_4m.csv, but without
+# The c6, c5, eth and poe builds. The same as components/ESP32-RevK/partitions_4m.csv, but without
 # the esp_secure_cert and fctry partitions, which this firmware doesn't use. That gives each update
 # slot another 64 KB.
 # Name,   Type, SubType, Offset,  Size, Flags

@@ -23,6 +23,9 @@ endif()
 
 if(EXISTS "../managed_components/espressif__ksz8851snl")
 	list(APPEND RECS espressif__ksz8851snl esp_eth esp_driver_ledc)
+else()
+	# ESP-IDF 5 has the Ethernet driver built in
+	list(APPEND RECS esp_eth esp_driver_ledc)
 endif()
 
 

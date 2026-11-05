@@ -74,8 +74,13 @@ static const char __attribute__((unused)) * TAG = "RevK";
 #endif
 #if defined(CONFIG_REVK_ETHERNET) && defined(CONFIG_REVK_ETH_KSZ8851SNL)
 #include <driver/ledc.h>
+#include "esp_idf_version.h"
+#if ESP_IDF_VERSION_MAJOR >= 6
 #include "esp_eth_phy_ksz8851snl.h"
 #include "esp_eth_mac_ksz8851snl.h"
+#else
+#include "esp_eth_mac_spi.h"        // Built in to ESP-IDF 5
+#endif
 #endif
 
 #ifdef  CONFIG_IDF_TARGET_ESP32S3

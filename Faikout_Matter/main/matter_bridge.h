@@ -1,7 +1,7 @@
 // Matter over Wi-Fi for Faikout.
 //
-// Faikout keeps owning Wi-Fi, BLE, MQTT, the web UI and its own OTA. Matter starts once the
-// station is on the network, and pairing happens over that network (no BLE).
+// Faikout keeps owning Wi-Fi, Ethernet, BLE, MQTT, the web UI and its own OTA. Matter starts once
+// the board is on the network, and pairing happens over that network (no BLE).
 //
 // Faikout.c is C with settings macros that clash with the Matter C++ headers, so the two sides
 // only talk through this file.
@@ -50,7 +50,7 @@ typedef struct {
 } matter_info_t;
 
 // Implemented in matter_bridge.cpp.
-void matter_bridge_start(void);                             // Returns at once; waits for Wi-Fi in its own task
+void matter_bridge_start(void);                             // Returns at once; waits for the network in its own task
 bool matter_bridge_report(const matter_ac_state_t *state);  // False if Matter isn't running yet
 void matter_bridge_open_window(void);                       // Open pairing for 5 minutes
 void matter_bridge_info(matter_info_t *info);
