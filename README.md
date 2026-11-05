@@ -390,6 +390,10 @@ This firmware uses the publicly available ESP-Matter test VID/PID and setup code
 
 Contributions are welcome. This is a solo-maintained project, so response times will vary, but every issue and PR gets read.
 
+### Testing without an AC
+
+`Thermostat_Daikin/test/s21_sim/run.sh` runs the real S21 driver against a simulated AC on your computer. It needs only a C++ compiler, not ESP-IDF or any hardware, and finishes instantly, so run it after changing `s21_driver.cpp`. The simulated AC is only a model of how a unit behaves, so still test on a real AC before relying on a change.
+
 ### Reporting bugs
 
 Open a [GitHub issue](../../issues/new) with:

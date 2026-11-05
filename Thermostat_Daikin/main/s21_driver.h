@@ -8,7 +8,7 @@
 #include "ac_backend.h"
 
 // Daikin S21 protocol backend: UART at 2400 baud 8E2, inverted through the
-// BSS138 level shifters. See S21_USE_UART in s21_driver.cpp.
+// BSS138 level shifters.
 class DaikinS21 : public ACBackend {
 public:
     DaikinS21();

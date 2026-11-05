@@ -16,17 +16,9 @@ static const char *TAG = "S21_DRIVER";
 // How many polls in a row the AC can stay silent before the link counts as lost.
 #define S21_LINK_LOST_POLLS 3
 
-// 1 = hardware UART, 0 = the older bit-banged software UART. Keep the bit-banged
-// version until the UART has proven itself on real units.
-#ifndef S21_USE_UART
-#define S21_USE_UART 1
-#endif
-
 static bool s_connected = false;
 static int s_tx_pin = 0;
 static int s_rx_pin = 0;
-
-#if S21_USE_UART
 
 #define S21_UART_NUM UART_NUM_1
 
@@ -71,78 +63,6 @@ static int s21_line_read(uint32_t timeout_ms) {
     uint8_t byte;
     return uart_read_bytes(S21_UART_NUM, &byte, 1, pdMS_TO_TICKS(timeout_ms)) == 1 ? byte : -1;
 }
-
-#else // !S21_USE_UART
-
-#define BIT_DELAY_US 417
-static portMUX_TYPE s_spinlock = portMUX_INITIALIZER_UNLOCKED;
-
-static void sw_write_byte(uint8_t byte) {
-    taskENTER_CRITICAL(&s_spinlock);
-    gpio_set_level((gpio_num_t)s_tx_pin, 1);
-    esp_rom_delay_us(BIT_DELAY_US);
-    int ones = 0;
-    for (int i = 0; i < 8; i++) {
-        int bit = (byte >> i) & 0x01;
-        if (bit) ones++;
-        gpio_set_level((gpio_num_t)s_tx_pin, bit ? 0 : 1); 
-        esp_rom_delay_us(BIT_DELAY_US);
-    }
-    int parity = (ones % 2 == 0) ? 0 : 1;
-    gpio_set_level((gpio_num_t)s_tx_pin, parity ? 0 : 1); 
-    esp_rom_delay_us(BIT_DELAY_US);
-    gpio_set_level((gpio_num_t)s_tx_pin, 0);
-    taskEXIT_CRITICAL(&s_spinlock);
-    esp_rom_delay_us(BIT_DELAY_US * 2);
-}
-
-static int sw_read_byte(uint32_t timeout_ms) {
-    int64_t start = esp_timer_get_time();
-    int64_t timeout_us = timeout_ms * 1000;
-    while (gpio_get_level((gpio_num_t)s_rx_pin) == 0) {
-        if (esp_timer_get_time() - start > timeout_us) return -1;
-    }
-    esp_rom_delay_us(BIT_DELAY_US / 2);
-    if (gpio_get_level((gpio_num_t)s_rx_pin) == 0) return -1;
-    esp_rom_delay_us(BIT_DELAY_US);
-    uint8_t byte = 0;
-    for (int i = 0; i < 8; i++) {
-        int level = gpio_get_level((gpio_num_t)s_rx_pin);
-        if (level == 0) byte |= (1 << i); 
-        esp_rom_delay_us(BIT_DELAY_US);
-    }
-    esp_rom_delay_us(BIT_DELAY_US * 2);
-    return byte;
-}
-
-static esp_err_t s21_line_init() {
-    gpio_config_t tx_conf = {};
-    tx_conf.pin_bit_mask = (1ULL << s_tx_pin);
-    tx_conf.mode = GPIO_MODE_OUTPUT;
-    tx_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-    esp_err_t err = gpio_config(&tx_conf);
-    if (!err) err = gpio_set_level((gpio_num_t)s_tx_pin, 0);
-    gpio_config_t rx_conf = {};
-    rx_conf.pin_bit_mask = (1ULL << s_rx_pin);
-    rx_conf.mode = GPIO_MODE_INPUT;
-    rx_conf.pull_up_en = GPIO_PULLUP_ENABLE;
-    if (!err) err = gpio_config(&rx_conf);
-    return err;
-}
-
-static void s21_line_deinit() {}
-
-static void s21_line_flush_rx() {}
-
-static void s21_line_write(const uint8_t *data, int len) {
-    for (int i = 0; i < len; i++) sw_write_byte(data[i]);
-}
-
-static int s21_line_read(uint32_t timeout_ms) {
-    return sw_read_byte(timeout_ms);
-}
-
-#endif // S21_USE_UART
 
 DaikinS21::DaikinS21() {
     m_dirty = false;
