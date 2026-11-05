@@ -1,13 +1,13 @@
-# Daikin S21 — Matter over Thread
+# Daikin Matter Controller
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPL_v3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.en.html)
-[![Stars](https://img.shields.io/github/stars/cptmeme/ESP-Matter-Daikin-S21?style=social)](../../stargazers)
+[![Stars](https://img.shields.io/github/stars/cptmeme/Daikin-Matter-Controller?style=social)](../../stargazers)
 
 > **⚠️ Disclaimer.** Opening your air conditioner exposes you to mains voltage and can damage the unit. Always disconnect mains power at the breaker before opening the indoor unit. Incorrect wiring on the S21 bus can damage the AC's controller board or the ESP32. You assume all responsibility for any damage, data loss, or device failure. This project is not affiliated with Daikin Industries, the Connectivity Standards Alliance, Espressif Systems, or RevK / the Faikin/Faikout project.
 
 Open source Matter firmware for Daikin split air conditioners with an S21 port. Adds your AC to Apple Home, Google Home, Alexa, and Home Assistant — no Daikin app, no cloud, no BRP module. **Most modern Daikin split units have an S21 connector inside the indoor unit waiting to be used.**
 
-> This release is the **Room Air Conditioner variant** — Matter device type `0x0072`, with **OnOff, Thermostat, Fan Control, Temperature Measurement, and Electrical Power/Energy Measurement** clusters bundled into a single tile. Power, mode (Heat / Cool / Auto / Off, plus Dry and Fan), setpoint, current temperature, fan speed, and power and energy use all surface as native Matter attributes.
+> Both firmwares below appear as a **Room Air Conditioner** — Matter device type `0x0072`, with **OnOff, Thermostat, Fan Control, Temperature Measurement, and Electrical Power/Energy Measurement** clusters bundled into a single tile. Power, mode (Heat / Cool / Auto / Off, plus Dry and Fan), setpoint, current temperature, fan speed, and power and energy use all surface as native Matter attributes.
 >
 > **Powerful mode** is exposed on a second endpoint as an OnOff plug-in unit. In Apple Home and Google Home it appears as an "Outlet" tile next to the AC tile — rename it to "Powerful" in your home app.
 
@@ -15,23 +15,50 @@ Open source Matter firmware for Daikin split air conditioners with an S21 port. 
 
 ---
 
+## Firmware options
+
+This repo has two firmwares. Pick one based on your board:
+
+| | Thread firmware | Faikout Matter |
+|---|---|---|
+| **Choose it if** | You're building the custom board and have a Thread Border Router | You have a Faikin or Faikout board, or want Faikout's features |
+| **Network** | Thread | Wi-Fi |
+| **Board** | The custom ESP32-C6 board in this repo | Faikin and Faikout boards with an ESP32-PICO-MINI-02 or ESP32-S3 |
+| **What it is** | Its own firmware, using Faikout's S21 protocol code | The original Faikout firmware, with Matter support added |
+| **Also has** | Matter only | Everything in Faikout: web interface, MQTT, Home Assistant discovery and BLE sensors |
+| **Pairing** | Over BLE | Over your network |
+| **Updates** | Matter OTA | Faikout's own updates |
+| **Folder** | [`Thermostat_Daikin`](Thermostat_Daikin) | [`Faikout_Matter`](Faikout_Matter) |
+| **Status** | Running on real ACs | **Not tested on hardware yet** |
+
+Faikout Matter has [its own README](Faikout_Matter/README.md). It's AI-assisted code and won't be merged into the original Faikout repo, because the Faikout project doesn't accept AI-based bug reports or merge requests.
+
+Unless a section says otherwise, the rest of this page covers the Thread firmware.
+
+---
+
 ## Contents
 
-- [Quick Start](#quick-start)
-- [Features](#features)
-- [Compatible Hubs](#compatible-hubs)
-- [Hardware](#hardware)
-- [Pin configuration](#pin-configuration)
-- [Building & Flashing](#building--flashing)
-- [Commissioning](#commissioning)
-- [Updating the Firmware](#updating-the-firmware)
-- [Factory Reset](#factory-reset)
-- [Known Issues / Roadmap](#known-issues--roadmap)
-- [Customizing the device name](#customizing-the-device-name)
-- [License](#license)
-- [Matter and Thread Certification](#matter-and-thread-certification)
-- [Contributing](#contributing)
-- [Why?](#why)
+- [Firmware options](#firmware-options)
+- [Faikout Matter](Faikout_Matter/README.md) (separate README)
+- **Thread firmware**
+  - [Quick Start](#quick-start)
+  - [Features](#features)
+  - [Compatible Hubs](#compatible-hubs)
+  - [Hardware](#hardware)
+  - [Pin configuration](#pin-configuration)
+  - [Building & Flashing](#building--flashing)
+  - [Commissioning](#commissioning)
+  - [Updating the Firmware](#updating-the-firmware)
+  - [Factory Reset](#factory-reset)
+  - [Customizing the device name](#customizing-the-device-name)
+- **Both firmwares**
+  - [S21 connector pinout](#s21-connector-pinout)
+  - [Known Issues / Roadmap](#known-issues--roadmap)
+  - [License](#license)
+  - [Matter and Thread Certification](#matter-and-thread-certification)
+  - [Contributing](#contributing)
+  - [Why?](#why)
 
 ---
 
@@ -48,6 +75,8 @@ Open source Matter firmware for Daikin split air conditioners with an S21 port. 
 ---
 
 ## Features
+
+Faikout Matter is built to offer the same Matter features over Wi-Fi, apart from the reset button and Matter OTA. It hasn't been tested on hardware yet.
 
 - ✅ Matter over Thread — uses the ESP32-C6's 802.15.4 radio, no WiFi required
 - ✅ Compatible with Apple Home, Google Home, Alexa, Home Assistant, etc.
@@ -72,6 +101,8 @@ Open source Matter firmware for Daikin split air conditioners with an S21 port. 
 ## Compatible Hubs
 
 > **Requires a Thread Border Router.** A Thread Border Router is required for any Matter-over-Thread device.
+
+These results are for the Thread firmware. Faikout Matter doesn't need a Thread Border Router, and hasn't been tested with any of these yet.
 
 | Ecosystem | Tested |
 |-----------|--------|
@@ -101,13 +132,17 @@ You need *something* between the ESP32-C6 and the Daikin's S21 port — the S21 
 Two interface options:
 
 1. **The reference PCB included in this repo, known to work end-to-end** — see the [`Custom PCB esp32c6/`](Custom%20PCB%20esp32c6/) folder. KiCad project + BOM. Built around a WT0132C6-S5, a BSS138 for level shifting, and a JST EH 5-way for the S21 connection. **Thread + Wi-Fi capable** thanks to the C6's 802.15.4 radio. *Note: This board does not feature an onboard USB port. Flashing is done via exposed `RX0` and `TX0` headers using an external USB-to-Serial adapter, and the board is powered via the `V_in` pin, which accepts **4.5V to 17V** (the limits of its TPS562246 regulator, whose absolute maximum is 19V). The 12-14V from S21 pin 4 is well within that.*
-2. **A RevK [ESP32-Faikout](https://codeberg.org/RevK/ESP32-Faikout) board.** This firmware's S21 implementation is derived from RevK's [Faikout](https://codeberg.org/RevK/ESP32-Faikout) project, and you'd reflash the board with this firmware instead of Faikout's. Faikout boards are sold by RevK and on Amazon UK — check the Faikout repo for current availability.
+2. **A RevK [ESP32-Faikout](https://codeberg.org/RevK/ESP32-Faikout) or older Faikin board.** Use [Faikout Matter](Faikout_Matter/README.md) for these. It keeps Faikout's firmware and adds Matter. Faikout boards are sold by RevK and on Amazon UK — check the Faikout repo for current availability.
 
-> **⚠️ Faikout = Matter over Wi-Fi only, and untested on real hardware.** Current Faikout PCBs use ESP32 / ESP32-S3 chips, neither of which has an 802.15.4 radio, so this firmware runs Matter over Wi-Fi on them, with no Thread Border Router involvement. You lose Thread's mesh / low-power benefits. It builds for the ESP32-S3 (`idf.py set-target esp32s3`), but that build hasn't been run on a Faikout board. Before building, set the pins in [`main/app_driver.cpp`](Thermostat_Daikin/main/app_driver.cpp): Faikout's own defaults for the S3 are GPIO 48 for TX and GPIO 34 for RX, and `BUTTON_GPIO_PIN` needs changing because GPIO 23 doesn't exist on the S3. A future Faikout revision based on the ESP32-C6 (or similar) would change this — track the Faikout repo if that matters to you.
+> **⚠️ Faikout boards = Matter over Wi-Fi only, and untested on real hardware.** Current Faikout PCBs use ESP32 / ESP32-S3 chips, neither of which has an 802.15.4 radio, so they can't use Thread and you lose its mesh / low-power benefits. A future Faikout revision based on the ESP32-C6 (or similar) would change this — track the Faikout repo if that matters to you.
+>
+> The Thread firmware also builds for the ESP32-S3 (`idf.py set-target esp32s3`), where it runs Matter over Wi-Fi, but that build hasn't been run on a Faikout board. If you try it, set the pins in [`main/app_driver.cpp`](Thermostat_Daikin/main/app_driver.cpp) first: Faikout's own defaults for the S3 are GPIO 48 for TX and GPIO 34 for RX, and `BUTTON_GPIO_PIN` needs changing because GPIO 23 doesn't exist on the S3.
 
 If you want to roll your own interface, use the included PCB as a reference rather than starting from scratch.
 
 ### S21 connector pinout
+
+This section and the next apply to both firmwares.
 
 Pinout, colors, and connector types are documented authoritatively in [Faikin's wiring wiki](https://codeberg.org/RevK/ESP32-Faikout/wiki/Wiring). Reproduced for convenience:
 
@@ -236,8 +271,8 @@ source ~/esp/esp-matter/export.sh
 ### 3. Build and flash
 
 ```bash
-git clone https://github.com/cptmeme/ESP-Matter-Daikin-S21.git
-cd ESP-Matter-Daikin-S21/Thermostat_Daikin
+git clone https://github.com/cptmeme/Daikin-Matter-Controller.git
+cd Daikin-Matter-Controller/Thermostat_Daikin
 
 # Edit main/app_driver.cpp first if your pins differ from the included PCB.
 
@@ -263,6 +298,8 @@ I (xxxx) app_main: Commissioning window opened
 This confirms Matter is initialized and the device is advertising for commissioning over BLE.
 
 ## Commissioning
+
+Faikout Matter uses the same setup code, but pairs over your network: see [its pairing steps](Faikout_Matter/README.md#pairing).
 
 - Commission devices ONE AT A TIME.
 - Power off or move away other un-commissioned devices while setting up each one.
@@ -297,6 +334,8 @@ Google Home, Alexa, and Home Assistant all support Matter commissioning via thei
 ---
 
 ## Updating the Firmware
+
+Faikout Matter doesn't use Matter OTA: see [its update notes](Faikout_Matter/README.md#updates).
 
 ### Versions
 
@@ -347,6 +386,8 @@ Each OTA slot is 1.875 MB (`0x1E0000` in `partitions.csv`), and `idf.py build` p
 
 Hold the onboard reset button (GPIO23 → GND) for **at least 5 seconds, then release it**. The device will clear all fabrics and re-enter BLE commissioning mode. Make sure to also remove the device from whatever ecosystems you've added it to — controllers cache credentials and will refuse re-pairing otherwise.
 
+Faikout Matter has no Matter reset button. Remove the device in your home app instead.
+
 ---
 
 ## Known Issues / Roadmap
@@ -354,6 +395,7 @@ Hold the onboard reset button (GPIO23 → GND) for **at least 5 seconds, then re
 - [ ] **Swing / louver position** — the S21 protocol supports it; no Matter wiring yet.
 - [ ] **Econo, comfort, streamer and other S21 settings** — not exposed over Matter yet. Toggling Powerful leaves them as they are.
 - [x] **X50A & CN_WIRED protocols (experimental)** — drivers for both are built in, with boot-time auto-detection (S21 → X50A → CN_WIRED). **Only S21 is hardware-verified.** X50A rides the same 2-wire UART front-end and should work with the right cable; CN_WIRED is a single-wire pulse protocol that needs a different connector/pull-up. RevK's wiring wiki notes that the CN_WIRED power pin can be above 12V without giving a figure, so measure it first: the included PCB is limited to 17V. Toggle them via `AC_ENABLE_X50A` / `AC_ENABLE_CNWIRED` in `Thermostat_Daikin/main/app_driver.cpp`.
+- [ ] **Faikout Matter** — first test on real hardware, then a unique pairing code for each board.
 
 ---
 
@@ -368,25 +410,29 @@ To change the manufacturer and model shown in your home app, edit [`main/CHIPPro
 
 Apple Home, Google Home, and Alexa display these in the device's settings page. The device's own name is whatever you call it in your home app. Changing them after the device is already commissioned won't update existing controllers — you'll need to factory reset and re-commission.
 
+For Faikout Matter, the same settings are in [`Faikout_Matter/main/CHIPProjectConfig.h`](Faikout_Matter/main/CHIPProjectConfig.h).
+
 ---
 
 ## License
 
 GPL v3 — see [LICENSE](LICENSE)
 
-The S21 protocol implementation is derived from the [Faikout](https://codeberg.org/RevK/ESP32-Faikout) project by RevK, which is licensed under GPL v3 — that's why this firmware is also GPL v3. Combined with portions of the [ESP-Matter](https://github.com/espressif/esp-matter) thermostat example by Espressif Systems (Apache 2.0, which is GPL-compatible in this direction).
+The S21 protocol implementation is derived from the [Faikout](https://codeberg.org/RevK/ESP32-Faikout) project by RevK, which is licensed under GPL v3 — that's why both firmwares are also GPL v3. The Thread firmware is combined with portions of the [ESP-Matter](https://github.com/espressif/esp-matter) thermostat example by Espressif Systems (Apache 2.0, which is GPL-compatible in this direction).
+
+[Faikout Matter](Faikout_Matter/README.md) contains modified copies of Faikout and its framework. Its README lists the upstream versions and the changes.
 
 ---
 
 ## Matter and Thread Certification
 
-This firmware is **not** Matter Certified or Thread Certified. It implements the Matter protocol via Espressif's [esp-matter](https://github.com/espressif/esp-matter) SDK and Thread via OpenThread, but has not been submitted to the Connectivity Standards Alliance (CSA) or Thread Group for certification. Certification requires CSA membership ($7,000+/year) and Authorized Test Lab evaluation, which are out of scope for an open-source community project.
+Neither firmware is Matter Certified or Thread Certified. Both implement the Matter protocol via Espressif's [esp-matter](https://github.com/espressif/esp-matter) SDK, and the Thread firmware implements Thread via OpenThread, but neither has been submitted to the Connectivity Standards Alliance (CSA) or Thread Group for certification. Certification requires CSA membership ($7,000+/year) and Authorized Test Lab evaluation, which are out of scope for an open-source community project.
 
-Devices flashed with this firmware will appear in Matter ecosystems as **uncertified Matter devices**. Most ecosystems show a one-time warning during commissioning ("Add Anyway" in Apple Home); this is normal and expected.
+Devices flashed with either firmware will appear in Matter ecosystems as **uncertified Matter devices**. Most ecosystems show a one-time warning during commissioning ("Add Anyway" in Apple Home); this is normal and expected.
 
-This firmware uses the publicly available ESP-Matter test VID/PID and setup code, which is acceptable for personal use and development but cannot be used in commercial certified products.
+Both firmwares use the publicly available ESP-Matter test VID/PID and setup code, which is acceptable for personal use and development but cannot be used in commercial certified products.
 
-"Matter" is a trademark of the Connectivity Standards Alliance. "Thread" is a trademark of the Thread Group. "Daikin" is a trademark of Daikin Industries, Ltd. This project is not affiliated with, endorsed by, or sponsored by any of these organizations.
+"Matter" is a trademark of the Connectivity Standards Alliance. "Thread" is a trademark of the Thread Group. "Daikin" is a trademark of Daikin Industries, Ltd. "Faikout" is a registered trademark of its owner. This project is not affiliated with, endorsed by, or sponsored by any of these organizations.
 
 ---
 
@@ -396,14 +442,15 @@ Contributions are welcome. This is a solo-maintained project, so response times 
 
 ### Testing without an AC
 
-`Thermostat_Daikin/test/s21_sim/run.sh` runs the real S21 driver against a simulated AC on your computer. It needs only a C++ compiler, not ESP-IDF or any hardware, and finishes instantly, so run it after changing `s21_driver.cpp`. The simulated AC is only a model of how a unit behaves, so still test on a real AC before relying on a change.
+`Thermostat_Daikin/test/s21_sim/run.sh` runs the Thread firmware's real S21 driver against a simulated AC on your computer. It needs only a C++ compiler, not ESP-IDF or any hardware, and finishes instantly, so run it after changing `s21_driver.cpp`. The simulated AC is only a model of how a unit behaves, so still test on a real AC before relying on a change.
 
 ### Reporting bugs
 
-Open a [GitHub issue](../../issues/new) with:
+Open a [GitHub issue](../../issues/new) with the details below. Report Faikout Matter problems here too, not to the Faikout project.
 
-- **Hardware:** ESP32-C6 board variant, S21 interface design (optocoupler / FET / which PCB), and Daikin model number
-- **Ecosystem:** Apple Home, Google Home, Alexa, Home Assistant, etc., and the Thread Border Router(s) on your network
+- **Firmware:** Thread firmware or Faikout Matter
+- **Hardware:** Board variant, S21 interface design (optocoupler / FET / which PCB), and Daikin model number
+- **Ecosystem:** Apple Home, Google Home, Alexa, Home Assistant, etc., and any Thread Border Router(s) on your network
 - **What happened:** What you expected, what actually occurred, and steps to reproduce
 - **Logs:** Serial monitor output at 115200 baud, especially anything around the failure point
 
@@ -425,13 +472,13 @@ Meanwhile, most modern Daikin split units ship with an **S21 service port** sitt
 
 ### Why Matter over Thread?
 
-Matter over Thread offers lower power consumption, lower latency, and a mesh that doesn't depend on your WiFi. Thread devices use any compatible Thread Border Router (HomePod mini, Apple TV 4K, iPhone 15 Pro+, Nest Hub 2nd gen, HA SkyConnect/Yellow) and continue to function even if your WiFi is down or congested. The ESP32-C6 has both a WiFi 6 radio and an 802.15.4 Thread radio — this firmware uses the Thread radio so the WiFi stack can stay quiet.
+Matter over Thread offers lower power consumption, lower latency, and a mesh that doesn't depend on your WiFi. Thread devices use any compatible Thread Border Router (HomePod mini, Apple TV 4K, iPhone 15 Pro+, Nest Hub 2nd gen, HA SkyConnect/Yellow) and continue to function even if your WiFi is down or congested. The ESP32-C6 has both a WiFi 6 radio and an 802.15.4 Thread radio — the Thread firmware uses the Thread radio so the WiFi stack can stay quiet.
 
 ### Why Matter, and not Faikin / ESPHome / Tasmota?
 
 Faikin is excellent and deserves credit — it's the source of this project's S21 implementation and the entire reason the protocol is documented at all. But Faikin (and ESPHome, Tasmota) all assume a central controller: Home Assistant, an MQTT broker, or a custom dashboard. They're great if that's your setup. They're a problem if it isn't.
 
-This firmware speaks Matter directly. There's no middleware:
+Both firmwares here speak Matter directly. There's no middleware:
 
 - **Apple Home user without Home Assistant?** It just works. Commission directly from the Home app.
 - **Google Home or Alexa user?** Same — direct Matter commissioning, no third-party hub.
@@ -439,5 +486,7 @@ This firmware speaks Matter directly. There's no middleware:
 - **Multi-ecosystem household?** Multi-fabric commissioning lets the same device live in Apple Home, HA, and Google Home simultaneously.
 
 Matter is an industry-standard protocol — your AC works with the ecosystems you have today and remains compatible with new Matter ecosystems as they appear.
+
+If you like Faikout's web interface and MQTT, or already own a Faikin or Faikout board, [Faikout Matter](Faikout_Matter/README.md) means you don't have to choose: it keeps what Faikout does and adds Matter.
 
 ---

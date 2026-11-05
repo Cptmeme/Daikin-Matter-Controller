@@ -1,0 +1,14 @@
+# Build output, one folder and sdkconfig per board
+build-*/
+sdkconfig.pico
+sdkconfig.n4r2
+sdkconfig.n8
+dependencies.lock
+.cache/
+
+# Generated from settings.def by build.sh
+main/settings.c
+main/settings.h
+
+# Update signing keys. Never commit these: anyone holding one can sign firmware your boards accept.
+*.pem
