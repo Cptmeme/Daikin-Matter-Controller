@@ -16,3 +16,7 @@ CONFIG_REVK_BUILD_SUFFIX="-S3-MINI-N4-R2-MT"
 # Keep Matter's own memory in PSRAM, so internal RAM stays free for Wi-Fi and BLE
 CONFIG_ESP_MATTER_MEM_ALLOC_MODE_EXTERNAL=y
 CONFIG_CHIP_MEM_ALLOC_MODE_EXTERNAL=y
+
+# Keep TLS buffers in PSRAM, so internal memory stays free for Wi-Fi, BLE and Matter
+CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC=n
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y

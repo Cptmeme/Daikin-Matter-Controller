@@ -305,6 +305,7 @@ static led_strip_handle_t revk_strip = NULL;
 
 #ifdef	CONFIG_REVK_WEB_EXTRA
 int __attribute__((weak)) config_revk_web_extra_pages = CONFIG_REVK_WEB_EXTRA_PAGES;
+const char *__attribute__((weak)) revk_web_extra_tab (int page) { return NULL; }      // Name for an extra settings tab, NULL for its number
 void __attribute__((weak)) revk_web_extra (httpd_req_t *, int8_t)
 {
 }
@@ -4678,6 +4679,10 @@ revk_web_settings (httpd_req_t *req)
                revk_web_send (req, "<br>");
             char temp[20];
             sprintf (temp, "%d", p);
+            const char *name = revk_web_extra_tab (p);
+            if (name)
+               addpage (p, name);
+            else
 #ifdef	REVK_SETTINGS_TAB
             if (*tab[p - 1])
                addpage (p, tab[p - 1]);

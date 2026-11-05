@@ -114,7 +114,7 @@ The Wi-Fi images pair like any Matter device: your home app connects over BLE an
 
 ## Features
 
-Faikout Matter is built to offer the same Matter features, apart from the reset button and Matter OTA. It hasn't been tested with an AC yet.
+Faikout Matter offers the same Matter features, apart from the reset button and Matter OTA. Powerful and power and energy are opt-in there, along with switches for its other modes: see [what it exposes](Faikout_Matter/README.md#what-it-exposes-over-matter). It hasn't been tested with an AC yet.
 
 - ✅ Matter over Thread — uses the chip's 802.15.4 radio, no WiFi required. Or Matter over Wi-Fi, depending on the image
 - ✅ Compatible with Apple Home, Google Home, Alexa, Home Assistant, etc.
@@ -339,7 +339,7 @@ This confirms Matter is initialized and the device is advertising for commission
 
 ## Commissioning
 
-Faikout Matter uses the same setup code, but pairs over your network: see [its pairing steps](Faikout_Matter/README.md#pairing).
+Faikout Matter pairs over your network instead, with its own code and QR code on its Matter settings tab: see [its pairing steps](Faikout_Matter/README.md#pairing).
 
 - Commission devices ONE AT A TIME.
 - Power off or move away other un-commissioned devices while setting up each one.
@@ -433,9 +433,10 @@ Faikout Matter has no Matter reset button. Remove the device in your home app in
 ## Known Issues / Roadmap
 - [x] **Energy reporting** — live power (W) + lifetime imported energy (kWh) via the Matter Electrical Power/Energy Measurement clusters, on S21 units that report it. Home Assistant shows both; the cooling/heating split is read but only logged (Matter carries a single imported/exported energy value, not a per-mode breakdown).
 - [ ] **Swing / louver position** — the S21 protocol supports it; no Matter wiring yet.
-- [ ] **Econo, comfort, streamer and other S21 settings** — not exposed over Matter yet. Toggling Powerful leaves them as they are.
+- [ ] **Econo, comfort, streamer and other S21 settings** — not exposed over Matter in the original firmware yet. Toggling Powerful leaves them as they are. Faikout Matter can expose them as opt-in switches.
 - [x] **X50A & CN_WIRED protocols (experimental)** — drivers for both are built in, with boot-time auto-detection (S21 → X50A → CN_WIRED). **Only S21 is hardware-verified.** X50A rides the same 2-wire UART front-end and should work with the right cable; CN_WIRED is a single-wire pulse protocol that needs a different connector/pull-up. RevK's wiring wiki notes that the CN_WIRED power pin can be above 12V without giving a figure, so measure it first: the included PCB is limited to 17V. Toggle them via `AC_ENABLE_X50A` / `AC_ENABLE_CNWIRED` in `Thermostat_Daikin/main/app_driver.cpp`.
-- [ ] **Faikout Matter** — test with a real AC, then give each board a unique pairing code.
+- [ ] **Faikout Matter** — test with a real AC.
+- [x] **Faikout Matter pairing** — a QR code, its own pairing code for each board, a settable name, and a button to turn Matter off.
 - [ ] **Pre-built images** — test everything except `thread-c6` on real hardware.
 
 ---

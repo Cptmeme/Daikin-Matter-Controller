@@ -42,32 +42,32 @@ esptool.py -p /dev/ttyUSB0 flash_id
 
 These builds differ from the other boards in a few ways:
 
-- **Button:** it works as on Faikout. Press once to restart, twice to start an update, and 3 times to erase the settings, including Wi-Fi and Matter pairings. It doesn't open pairing as it does on the original firmware, so use the Matter page.
+- **Button:** it works as on Faikout. Press once to restart, twice to start an update, and 3 times to erase the settings, including Wi-Fi and Matter pairings. It doesn't open pairing as it does on the original firmware, so use the Matter settings tab.
 - **Console:** logs go to the `RX0` and `TX0` header, because the board has no USB port. It has no status LED.
-- **Size:** some code is left out so they fit in 4 MB. See [below](#whats-left-out-of-the-c6-c5-eth-and-poe-images).
+- **Size:** they only fit in 4 MB because some code is left out, as on every board. See [below](#whats-left-out-to-save-space).
 - **Switching firmware:** moving a board between this and the original firmware takes a serial flash, because the partition layouts differ. Pair it again afterwards.
 
 On the `c5` board, GPIO 14 is also the USB D+ pin, so test the button first. The ESPC5-12's ground pad also stays unsoldered, because the PCB's footprint doesn't have one, and the S21 vias overlap the edge of that pad. Check `RX1` and `TX1` to GND with a meter after soldering.
 
-### What's left out of the `c6`, `c5`, `eth` and `poe` images
+### What's left out to save space
 
-These images have parts stripped out to save flash space. This shouldn't break anything, because Faikout doesn't use these parts, but that comes from reading the code and hasn't been tested on hardware yet. The `pico`, `n4r2` and `n8` images aren't affected.
+Every image has parts stripped out to save flash space. This shouldn't break anything, because Faikout doesn't use these parts. It comes from reading the code, and only the `pico` image has run so far.
 
 | Left out | Why it shouldn't matter |
 |---|---|
 | BLE connections, BLE 5 features and BLE services | Faikout only scans for sensors and advertises, and that stays |
 | Enterprise Wi-Fi, OWE, SAE-PK, and WPA3 on the setup access point | Faikout has no settings for them. WPA2 and WPA3 on your own network stay |
-| TLS server, DTLS, pre-shared keys and static ECDH key exchange | Faikout only connects out, for MQTT and updates. TLS 1.2 with ECDHE or RSA stays, and so do client certificates and the CA bundle |
+| TLS server, DTLS, pre-shared keys, static ECDH key exchange, renegotiation and CRLs | Faikout only connects out, for MQTT and updates. TLS 1.2 with ECDHE or RSA stays, and so do client certificates and the CA bundle |
 | The P-192, P-224, P-521, secp256k1 and Brainpool curves | P-256, P-384 and Curve25519 stay. The one case that would fail is a server whose certificate uses a removed curve |
-| Assert messages, error names and TLS error text | Logs get less detailed, but nothing changes in how the firmware behaves |
-| The `esp_secure_cert` and `fctry` partitions | This firmware doesn't use them |
+| Assert messages, error names, TLS error text and BLE warnings | Logs get less detailed, but nothing changes in how the firmware behaves |
+| On `c6` and `c5`, the `esp_secure_cert` and `fctry` partitions | This firmware doesn't use them |
 
 The full list is in [`sdkconfig.defaults.matter-small`](sdkconfig.defaults.matter-small) and [`partitions_4m_matter.csv`](partitions_4m_matter.csv).
 
 ## How it works
 
 1. Faikout starts as usual and connects to your Wi-Fi. Set up a new board through its access point, as with stock Faikout.
-2. Matter starts once Wi-Fi is up, and Faikout stays in control of Wi-Fi.
+2. Once you turn Matter on, it starts when Wi-Fi is up, and Faikout stays in control of Wi-Fi.
 3. Pairing happens over your network, without BLE, so BLE stays free for Faikout's sensors.
 
 Matter commands go through the same functions as Faikout's web interface and MQTT, so they should work with any AC protocol Faikout supports. Matter's device layout, fan slider and setpoint behaviour match the [original firmware](../README.md#features).
@@ -104,11 +104,41 @@ Flashing doesn't erase the settings, so your Wi-Fi details should carry over. Bo
 
 ## Pairing
 
-1. Open `http://<board address>/matter`. There's also a **Matter pairing** link on the main control page.
-2. A board that isn't paired yet stays open for pairing for 15 minutes after it starts. Otherwise, select **Open pairing for 5 minutes**.
-3. Add a device in your home app and enter the code shown on the page.
+Everything for Matter is on the **Matter** tab of Faikout's settings page. Pairing is at the top.
 
-To unpair, remove the device in your home app. Pairing opens again once the last controller is gone. To turn Matter off, clear **Matter** on Faikout's settings page and restart the board.
+1. Matter is off until you turn it on, so turn on the **Matter** switch on that tab and save. The board restarts.
+2. A board that isn't paired yet stays open for pairing for 15 minutes after it starts. Otherwise, select **Open pairing for 5 minutes**.
+3. Add a device in your home app, and scan the QR code on the tab or enter the number below it.
+
+Each board picks its own random pairing code the first time Matter starts, and restarts once to save it. To choose your own, set **Matter pairing code** (8 digits) and **Matter discriminator** (0 to 4095) on the same tab. Matter doesn't allow some codes, such as `12345678` or the same digit eight times. A board given one of those picks a new random code instead. Changing the code doesn't affect devices that are already paired.
+
+**Matter name** on the same tab sets the name a home app suggests when you add the device. It's sent as the product name, so apps may also show it as the model. Apps keep their own name for a device once it's added.
+
+To unpair, remove the device in your home app. Pairing opens again once the last controller is gone. A home app can leave a pairing behind on the board, as Apple Home sometimes does, so the tab also has **Remove all pairings**. It asks you to confirm, and needs the settings password if you've set one.
+
+To turn Matter off or back on, use the **Matter** switch on the tab and save. The board restarts, and its pairings are kept while Matter is off. Home apps show the device as not responding until you turn Matter back on.
+
+## What it exposes over Matter
+
+By default it exposes just the AC: on and off, heat, cool and auto, the setpoint, the current temperature and the fan speed.
+
+You can expose more under **Also expose over Matter**, on the **Matter** tab of Faikout's settings page. Each item appears as its own switch, which you rename in your home app, as with Powerful on the original firmware:
+
+| Setting | What the switch does |
+|---|---|
+| Power and energy | Not a switch: adds the AC's power and energy use, if it reports them |
+| Powerful | Powerful mode |
+| Night (quiet fan) | Fan on Quiet. Turning it off sets the fan to Auto |
+| Econo | Econo mode |
+| Comfort | Comfort mode |
+| Streamer | Streamer |
+| Intelligent eye | The motion sensor mode |
+| Outdoor quiet | Quiet outdoor unit |
+| Swing horizontal | Horizontal swing |
+| Swing vertical | Vertical swing |
+| LED | The indoor unit's LED |
+
+Items Faikout is set as not having, with its `no…` settings, aren't offered. The board restarts when you change these. Each switch always keeps the same Matter endpoint, so adding or removing one doesn't mix up the others in your home app. The Matter tab lists what's exposed.
 
 ## Updates
 
@@ -116,11 +146,11 @@ Faikout's own update feature stays, but the update server is left empty, so this
 
 ## Known limitations
 
-- **Pairing code:** every board uses the same SDK test code, `3497-011-2332`. Anyone on your network can pair while pairing is open, so only open it when you need it.
+- **Pairing code:** the Matter tab shows it to anyone on your network who can open the settings page, unless you set a password. Only open pairing when you need it.
 - **Certification:** it uses SDK test credentials, so home apps show the device as uncertified. It's for personal use only.
 - **Changing Wi-Fi:** change networks in Faikout's settings, not through a Matter controller.
-- **Flash space:** `n4r2` and `n8` are close to outgrowing their update slots, with about 12 KB and 16 KB left, and so is `c5` with about 13 KB. `c6` has about 51 KB, `pico` about 87 KB, and `eth` and `poe` about 308 KB.
-- **Memory:** `n8`, `c6` and `c5` have no PSRAM, so they may run short of RAM, especially with BLE sensors. Even with PSRAM, `pico` had only 46 KB of internal memory free once paired. The Matter page shows free memory.
+- **Flash space:** `c5` is close to outgrowing its update slot, with about 4 KB left. `c6` has about 42 KB, and the other boards about 230 KB or more.
+- **Memory:** `n8`, `c6` and `c5` have no PSRAM, so they may run short of RAM, especially with BLE sensors. Even with PSRAM, `pico` had only 46 KB of internal memory free once paired. The Matter tab shows free memory.
 
 ## Origin and licence
 
@@ -137,8 +167,8 @@ This folder contains modified copies of these upstream versions:
 Changes made on 2026-11-05:
 
 - **Added:** `main/matter_bridge.cpp` and `.h`, `main/CHIPProjectConfig.h`, `build.sh`, `partitions_4m_matter.csv`, the `sdkconfig.defaults.matter*` files and this README.
-- **`main/Faikout.c`:** hooks for Matter, a `/matter` web page, and removal of a comment on line 3 aimed at AI tools.
+- **`main/Faikout.c`:** hooks for Matter, a Matter settings tab, and removal of a comment on line 3 aimed at AI tools.
 - **`main/settings.def`:** the `matter.enable` setting, and the S21 pins of the custom PCB as the C5 and C6 defaults.
 - **`components/ESP32-RevK/settings.def`:** the custom PCB's button as the C5 and C6 default, and automatic updates off by default.
-- **`components/ESP32-RevK/revk.c`:** removed RevK's unfinished 2023 Matter workarounds, which turned off the setup access point and mDNS. Also made two event names that only exist in ESP-IDF 6 conditional.
+- **`components/ESP32-RevK/revk.c`:** removed RevK's unfinished 2023 Matter workarounds, which turned off the setup access point and mDNS. Also made two event names that only exist in ESP-IDF 6 conditional, used ESP-IDF 5's built-in Ethernet driver, and added a hook so an app can name its extra settings tabs.
 - **Build files:** builds with ESP-IDF 5.5, because esp-matter v1.5 doesn't support ESP-IDF 6. Uses ESP-IDF 5's built-in Ethernet driver instead of the `ksz8851snl` package, which needs ESP-IDF 6.

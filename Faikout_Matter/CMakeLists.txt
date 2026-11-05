@@ -15,10 +15,7 @@ set(PROJECT_VER "1.0")
 set(PROJECT_VER_NUMBER 1)
 
 # An existing sdkconfig.<board> takes priority over these files: delete it after changing them.
-set(SDKCONFIG_DEFAULTS "sdkconfig.defaults;sdkconfig.defaults.matter;sdkconfig.defaults.matter-$ENV{FAIKOUT_BOARD}")
-if("$ENV{FAIKOUT_BOARD}" MATCHES "^(c6|c5|eth|poe)$")
-    list(APPEND SDKCONFIG_DEFAULTS "sdkconfig.defaults.matter-small")
-endif()
+set(SDKCONFIG_DEFAULTS "sdkconfig.defaults;sdkconfig.defaults.matter;sdkconfig.defaults.matter-small;sdkconfig.defaults.matter-$ENV{FAIKOUT_BOARD}")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
@@ -31,3 +28,5 @@ project(Faikout)
 idf_build_set_property(CXX_COMPILE_OPTIONS "-std=gnu++17;-Os;-DCHIP_HAVE_CONFIG_H;-Wno-overloaded-virtual" APPEND)
 idf_build_set_property(C_COMPILE_OPTIONS "-Os" APPEND)
 idf_build_set_property(COMPILE_OPTIONS "-Wno-format-nonliteral;-Wno-format-security" APPEND)
+# Keep the SDK's location on this computer out of the binaries
+idf_build_set_property(COMPILE_OPTIONS "-fmacro-prefix-map=${ESP_MATTER_PATH}=/esp-matter" APPEND)

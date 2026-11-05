@@ -16,3 +16,8 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=n
 
 # The board has no status LED
 CONFIG_REVK_BLINK=""
+
+# Two update slots of 1.94 MB, see the file for what makes room
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_4m_matter.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions_4m_matter.csv"

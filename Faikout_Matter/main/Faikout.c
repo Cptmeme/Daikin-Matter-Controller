@@ -20,7 +20,9 @@ static const char TAG[] = "Faikout";
 #include "daikin_s21.h"
 #include "halib.h"
 #ifdef FAIKOUT_MATTER
+#include "esp_random.h"
 #include "matter_bridge.h"
+#include "qrcode.h"
 #endif
 
 #if defined(CONFIG_IDF_TARGET_ESP32C5) && (ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5, 5, 2))
@@ -2188,9 +2190,6 @@ web_control (httpd_req_t *req)
                   "c();"        //
                   "setInterval(function() {if(!ws.readyState)ws.close();else if(ws.readyState==1)ws.send('');},1000);"  //
                   "</script>", fahrenheit ? "Math.round(10*((v*9/5)+32))/10+'℉'" : "v+'℃'");
-#ifdef FAIKOUT_MATTER
-   revk_web_send (req, "<p><a href=/matter>Matter pairing</a></p>");
-#endif
    return revk_web_foot (req, 0, websettings, b.protocol_set ? proto_name () : NULL);
 }
 
@@ -3371,9 +3370,48 @@ uart_setup (void)
    }
 }
 
+#ifdef FAIKOUT_MATTER
+static void web_matter_status (httpd_req_t *req);
+#endif
+
 void
 revk_web_extra (httpd_req_t *req, int page)
 {
+#ifdef FAIKOUT_MATTER
+   if (page == 1)
+   {                            // The Matter tab
+      web_matter_status (req);
+      revk_web_setting (req, "Matter", "matterenable");
+      if (matterenable)
+      {
+         revk_web_setting (req, "Matter pairing code", "mattercode");
+         revk_web_setting (req, "Matter discriminator", "matterid");
+         revk_web_setting (req, "Matter name", "mattername");
+         revk_web_setting_title (req, "Also expose over Matter");
+         revk_web_setting (req, "Power and energy", "mxenergy");
+         if (!nopowerful)
+            revk_web_setting (req, "Powerful", "mxpowerful");
+         revk_web_setting (req, "Night (quiet fan)", "mxnight");
+         if (!noecono)
+            revk_web_setting (req, "Econo", "mxecono");
+         if (!nocomfort)
+            revk_web_setting (req, "Comfort", "mxcomfort");
+         if (!nostreamer)
+            revk_web_setting (req, "Streamer", "mxstreamer");
+         if (!nosensor)
+            revk_web_setting (req, "Intelligent eye", "mxsensor");
+         if (!noquiet)
+            revk_web_setting (req, "Outdoor quiet", "mxquiet");
+         if (!noswingh)
+            revk_web_setting (req, "Swing horizontal", "mxswingh");
+         if (!noswingv)
+            revk_web_setting (req, "Swing vertical", "mxswingv");
+         if (!noled)
+            revk_web_setting (req, "LED", "mxled");
+      }
+      return;
+   }
+#endif
    if (*mqtthost[0] && !revk_mqtt (0))
       revk_web_setting_info (req, "Note, MQTT not connected: %s", mqtthost[0]);
    if (daikin.ha_sent)
@@ -3387,9 +3425,6 @@ revk_web_extra (httpd_req_t *req, int page)
    revk_web_setting (req, "Home Assistant", "haenable");
    if (haenable)
       revk_web_setting (req, "HA Extra switches", "haswitches");
-#ifdef FAIKOUT_MATTER
-   revk_web_setting (req, "Matter", "matterenable");
-#endif
    revk_web_setting (req, "Dark mode LED", "dark");
    revk_web_setting (req, "Debug", "debug");
    if (!daikin.remote)
@@ -3406,6 +3441,14 @@ revk_web_extra (httpd_req_t *req, int page)
 // --------------------------------------------------------------------------------
 // Matter (see matter_bridge.h)
 
+int config_revk_web_extra_pages = 1;    // A settings tab for Matter
+
+const char *
+revk_web_extra_tab (int page)
+{
+   return page == 1 ? "Matter" : NULL;
+}
+
 void
 faikout_matter_snapshot (matter_ac_state_t *s)
 {
@@ -3417,7 +3460,18 @@ faikout_matter_snapshot (matter_ac_state_t *s)
    s->mode = daikin.mode;
    s->fan_known = !!(daikin.status_known & CONTROL_fan);
    s->fan = daikin.fan;
-   s->powerful = daikin.powerful;
+#define extra(n,on,known) s->extra[n]=(on);s->extra_known[n]=!!(daikin.status_known&(known));
+   extra (MATTER_EXTRA_POWERFUL, daikin.powerful, CONTROL_powerful);
+   extra (MATTER_EXTRA_NIGHT, daikin.fan == FAIKIN_FAN_QUIET, CONTROL_fan);
+   extra (MATTER_EXTRA_ECONO, daikin.econo, CONTROL_econo);
+   extra (MATTER_EXTRA_COMFORT, daikin.comfort, CONTROL_comfort);
+   extra (MATTER_EXTRA_STREAMER, daikin.streamer, CONTROL_streamer);
+   extra (MATTER_EXTRA_SENSOR, daikin.sensor, CONTROL_sensor);
+   extra (MATTER_EXTRA_QUIET, daikin.quiet, CONTROL_quiet);
+   extra (MATTER_EXTRA_SWINGH, daikin.swingh, CONTROL_swingh);
+   extra (MATTER_EXTRA_SWINGV, daikin.swingv, CONTROL_swingv);
+   extra (MATTER_EXTRA_LED, daikin.led, CONTROL_led);
+#undef extra
    s->target = (daikin.status_known & CONTROL_temp) ? daikin.temp : NAN;
    // Same choice of sensor as revk_state_extra
    s->current = (daikin.status_known & CONTROL_env) ? daikin.env :      //
@@ -3467,9 +3521,69 @@ faikout_matter_set_fan (uint8_t faikin_fan)
 }
 
 void
-faikout_matter_set_powerful (bool on)
+faikout_matter_set_extra (uint8_t extra, bool on)
 {
-   matter_set_result ("powerful", daikin_set_v (powerful, on ? 1 : 0));
+   const char *e = NULL;
+   switch (extra)
+   {
+   case MATTER_EXTRA_POWERFUL:
+      e = daikin_set_v (powerful, on ? 1 : 0);
+      break;
+   case MATTER_EXTRA_NIGHT:   // Quiet fan, and back to Auto when turned off
+      if (on)
+         e = daikin_set_v (fan, FAIKIN_FAN_QUIET);
+      else if (daikin.fan == FAIKIN_FAN_QUIET)
+         e = daikin_set_v (fan, FAIKIN_FAN_AUTO);
+      break;
+   case MATTER_EXTRA_ECONO:
+      e = daikin_set_v (econo, on ? 1 : 0);
+      break;
+   case MATTER_EXTRA_COMFORT:
+      e = daikin_set_v (comfort, on ? 1 : 0);
+      break;
+   case MATTER_EXTRA_STREAMER:
+      e = daikin_set_v (streamer, on ? 1 : 0);
+      break;
+   case MATTER_EXTRA_SENSOR:
+      e = daikin_set_v (sensor, on ? 1 : 0);
+      break;
+   case MATTER_EXTRA_QUIET:
+      e = daikin_set_v (quiet, on ? 1 : 0);
+      break;
+   case MATTER_EXTRA_SWINGH:
+      e = daikin_set_v (swingh, on ? 1 : 0);
+      break;
+   case MATTER_EXTRA_SWINGV:
+      e = daikin_set_v (swingv, on ? 1 : 0);
+      break;
+   case MATTER_EXTRA_LED:
+      e = daikin_set_v (led, on ? 1 : 0);
+      break;
+   }
+   matter_set_result ("switch", e);
+}
+
+static const char *const matter_extra_name[MATTER_EXTRAS] = {
+   "Powerful", "Night", "Econo", "Comfort", "Streamer", "Intelligent eye", "Outdoor quiet", "Swing horizontal", "Swing vertical", "LED"
+};
+
+static uint32_t
+matter_extras_chosen (void)
+{                               // The switches chosen in the settings, apart from ones the AC is set as not having
+   uint32_t m = 0;
+#define extra(n,on) if (on) m |= (1u << (n));
+   extra (MATTER_EXTRA_POWERFUL, mxpowerful && !nopowerful);
+   extra (MATTER_EXTRA_NIGHT, mxnight);
+   extra (MATTER_EXTRA_ECONO, mxecono && !noecono);
+   extra (MATTER_EXTRA_COMFORT, mxcomfort && !nocomfort);
+   extra (MATTER_EXTRA_STREAMER, mxstreamer && !nostreamer);
+   extra (MATTER_EXTRA_SENSOR, mxsensor && !nosensor);
+   extra (MATTER_EXTRA_QUIET, mxquiet && !noquiet);
+   extra (MATTER_EXTRA_SWINGH, mxswingh && !noswingh);
+   extra (MATTER_EXTRA_SWINGV, mxswingv && !noswingv);
+   extra (MATTER_EXTRA_LED, mxled && !noled);
+#undef extra
+   return m;
 }
 
 static void
@@ -3493,34 +3607,108 @@ matter_tick (void)
    }
 }
 
-static esp_err_t
-web_matter (httpd_req_t *req)
-{
-   char query[16] = "";
-   if (httpd_req_get_url_query_str (req, query, sizeof (query)) == ESP_OK && !strcmp (query, "open=1"))
-   {
-      matter_bridge_open_window ();
-      usleep (200000);          // It opens on the Matter task, so give it a moment to show below
+static httpd_req_t *web_matter_qr_req;  // The QR library's callback can't take this. Pages are served one at a time.
+
+static void
+web_matter_qr (esp_qrcode_handle_t qr)
+{                               // Draw the pairing QR code as an SVG, with the blank border scanners need
+   httpd_req_t *req = web_matter_qr_req;
+   int size = esp_qrcode_get_size (qr);
+   revk_web_send (req, "<p><svg viewBox='-4 -4 %d %d' width=240 height=240 shape-rendering=crispEdges style='background:#fff'><path d='",
+                  size + 8, size + 8);
+   for (int y = 0; y < size; y++)
+   {                            // One piece per row, each row being runs of dark squares
+      char row[512];
+      int used = 0;
+      for (int x = 0; x < size; x++)
+         if (esp_qrcode_get_module (qr, x, y))
+         {
+            int len = 1;
+            while (x + len < size && esp_qrcode_get_module (qr, x + len, y))
+               len++;
+            used += snprintf (row + used, sizeof (row) - used, "M%d %dh%dv1h-%dz", x, y, len, len);
+            x += len - 1;
+         }
+      if (used)
+         revk_web_send (req, "%s", row);
    }
+   revk_web_send (req, "'/></svg></p>");
+}
+
+static void
+web_matter_status (httpd_req_t *req)
+{                               // Pairing, at the top of the Matter settings tab. That tab is one form, so the button
+   // posts the form to /matter rather than being a form of its own.
    matter_info_t info;
    matter_bridge_info (&info);
-   web_head (req, "Matter");
+   revk_web_send (req, "<tr><td colspan=3>");
    if (!matterenable)
-      revk_web_send (req, "<p>Matter is turned off in the settings.</p>");
+      revk_web_send (req, "<p>Matter is off. Turn it on below and save, to pair this board with a home app. Any pairings it already has are kept.</p>");
    else if (!info.started)
       revk_web_send (req, "<p>Matter starts once the network is connected.</p>");
    else
    {
       revk_web_send (req, "<p>Paired with %u controller%s.</p>", info.fabrics, info.fabrics == 1 ? "" : "s");
       if (info.window_open)
-         revk_web_send (req, "<p>Pairing is open. Add a device in your home app and enter this code:</p>"      //
-                        "<p style='font-size:150%%'><b>%s</b></p><p>QR code contents: %s</p>", info.manual_code, info.qr_code);
-      else
+      {
+         revk_web_send (req, "<p>Pairing is open. Add a device in your home app, and scan this QR code or enter the number.</p>");
+         esp_qrcode_config_t cfg = ESP_QRCODE_CONFIG_DEFAULT ();
+         cfg.display_func = web_matter_qr;
+         cfg.max_qrcode_version = 4;    // Plenty for a Matter code, and it needs less memory
+         web_matter_qr_req = req;
+         esp_qrcode_generate (&cfg, info.qr_code);
+         revk_web_send (req, "<p style='font-size:150%%'><b>%.4s-%.3s-%s</b></p>", info.manual_code, info.manual_code + 4, info.manual_code + 7);
+      } else
          revk_web_send (req, "<p><a href='/matter?open=1'>Open pairing for 5 minutes</a></p>");
+      if (info.fabrics)
+         revk_web_send (req, "<p><button type=submit formaction=/matter formmethod=post name=forget value=1"
+                        " onclick=\"return confirm('Remove all Matter pairings from this board? Home apps lose it until you pair it again.')\">"
+                        "Remove all pairings</button></p>");
    }
-   revk_web_send (req, "<p>Free memory: %u kB internal (largest block %u kB), %u kB PSRAM</p>",        //
-                  (unsigned) (info.free_internal / 1024), (unsigned) (info.largest_internal / 1024), (unsigned) (info.free_psram / 1024));
-   return revk_web_foot (req, 1, websettings, NULL);
+   if (matterenable)
+   {                            // Say what else is exposed
+      uint32_t extras = matter_extras_chosen ();
+      revk_web_send (req, "<p>Exposed over Matter: the AC");
+      if (mxenergy)
+         revk_web_send (req, ", power and energy use");
+      for (int i = 0; i < MATTER_EXTRAS; i++)
+         if (extras & (1u << i))
+            revk_web_send (req, ", %s", matter_extra_name[i]);
+      revk_web_send (req, ".</p>");
+   }
+   if (info.started)
+      revk_web_send (req, "<p>Free memory: %u kB internal (largest block %u kB), %u kB PSRAM</p>",        //
+                     (unsigned) (info.free_internal / 1024), (unsigned) (info.largest_internal / 1024), (unsigned) (info.free_psram / 1024));
+   revk_web_send (req, "</td></tr>");
+}
+
+static esp_err_t
+web_matter (httpd_req_t *req)
+{                               // Actions from the Matter settings tab, which this then returns to. Old links land there too.
+   if (req->method == HTTP_POST)
+   {                            // Remove all pairings, with the same password rule as the settings page
+      jo_t j = revk_web_query (req);
+      if (j && jo_find (j, "forget"))
+      {
+#ifdef CONFIG_REVK_SETTINGS_PASSWORD
+         if (*password && !(jo_find (j, "password") && !jo_strcmp (j, password)))
+         {
+            jo_free (&j);
+            return revk_web_redirect (req, "/revk-settings?_page=1", "Wrong password, nothing was removed");
+         }
+#endif
+         matter_bridge_forget ();
+         usleep (500000);       // It happens on the Matter task, so give it a moment before the tab shows it
+      }
+      jo_free (&j);
+   }
+   char query[16] = "";
+   if (httpd_req_get_url_query_str (req, query, sizeof (query)) == ESP_OK && !strcmp (query, "open=1"))
+   {
+      matter_bridge_open_window ();
+      usleep (200000);          // It opens on the Matter task, so give it a moment before the tab shows it
+   }
+   return revk_web_redirect (req, "/revk-settings?_page=1", "Matter settings");
 }
 #endif
 
@@ -3554,6 +3742,19 @@ app_main ()
    {
       jo_t j = jo_object_alloc ();
       jo_string (j, "factorygpio", "-21");
+      revk_settings_store (j, NULL, REVK_SETTINGS_PASSOVERRIDE);
+   }
+#endif
+#if defined(FAIKOUT_MATTER) && defined(CONFIG_REVK_PICO) && defined(CONFIG_REVK_BLINK_DEF) && !defined(CONFIG_REVK_BLINK_WS2812_DEF)
+   if (!(gpio_ok (blink[0].num) & 1))
+   {                            // An LED pin this chip doesn't have, such as the S3 default: use this board's LED, from its PCB file.
+      // Not checking blink[0].set, because the framework clears it for such a pin before this runs.
+      jo_t j = jo_object_alloc ();
+      jo_array (j, "blink");
+      jo_string (j, NULL, "-8");
+      jo_string (j, NULL, "-19");
+      jo_string (j, NULL, "-7");
+      jo_close (j);
       revk_settings_store (j, NULL, REVK_SETTINGS_PASSOVERRIDE);
    }
 #endif
@@ -3602,7 +3803,7 @@ app_main ()
    if (webcontrol || websettings)
    {
       // Web interface
-      httpd_config_t config = revk_httpd_config (17);
+      httpd_config_t config = revk_httpd_config (18);
       ESP_LOGE (TAG, "HTTPD stack %u sockets %u handlers %u", config.stack_size, config.max_open_sockets, config.max_uri_handlers);
       if (!httpd_start (&webserver, &config))
       {
@@ -3628,6 +3829,7 @@ app_main ()
             revk_register_get_uri (webserver, "/aircon/set_holiday", legacy_web_set_holiday);
 #ifdef FAIKOUT_MATTER
             revk_register_get_uri (webserver, "/matter", web_matter);
+            revk_register_post_uri (webserver, "/matter", web_matter);
 #endif
          }
          // When adding, update config.max_uri_handlers
@@ -3635,7 +3837,19 @@ app_main ()
    }
 #ifdef FAIKOUT_MATTER
    if (matterenable)
-      matter_bridge_start ();
+   {
+      if (matter_bridge_valid_code (mattercode) && matterid <= 4095)
+         matter_bridge_start (mattercode, matterid, mattername, matter_extras_chosen (), mxenergy);
+      else
+      {                         // Give this board its own pairing details. Saving them restarts it.
+         jo_t j = jo_object_alloc ();
+         if (!matter_bridge_valid_code (mattercode))
+            jo_int (j, "mattercode", matter_bridge_random_code ());
+         if (matterid > 4095)
+            jo_int (j, "matterid", esp_random () % 4096);
+         revk_settings_store (j, NULL, REVK_SETTINGS_PASSOVERRIDE);
+      }
+   }
 #endif
 #ifdef	ELA
    if (bleenable)

@@ -10,17 +10,23 @@
 #include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <esp_netif.h>
+#include <esp_random.h>
 #include <esp_wifi.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
 #include <esp_matter.h>
+#include <esp_matter_providers.h>
 
 #include <app/server/CommissioningWindowManager.h>
 #include <app/server/Dnssd.h>
 #include <app/server/Server.h>
+#include <crypto/CHIPCryptoPAL.h>
+#include <lib/support/CodeUtils.h>
 #include <lib/support/Span.h>
 #include <platform/CHIPDeviceLayer.h>
+#include <platform/CommissionableDataProvider.h>
+#include <platform/DeviceInstanceInfoProvider.h>
 #include <setup_payload/OnboardingCodesUtil.h>
 #include <setup_payload/SetupPayload.h>
 
@@ -40,7 +46,8 @@ static const char *TAG = "Matter";
 static constexpr uint16_t k_window_seconds = 300;
 
 static uint16_t s_ac_endpoint;
-static uint16_t s_powerful_endpoint;
+static uint32_t s_extras;      // MATTER_EXTRA_* bits
+static bool s_energy;
 static volatile bool s_started;
 
 // True while a report runs. Matter's fan logic reacts to reports by writing the fan attributes
@@ -183,9 +190,9 @@ static esp_err_t attribute_cb(attribute::callback_type_t type, uint16_t endpoint
     if (type != attribute::PRE_UPDATE) {
         return ESP_OK;
     }
-    if (endpoint == s_powerful_endpoint) {
+    if (endpoint >= MATTER_EXTRA_FIRST_ENDPOINT && endpoint < MATTER_EXTRA_FIRST_ENDPOINT + MATTER_EXTRAS) {
         if (cluster == OnOff::Id && attribute_id == OnOff::Attributes::OnOff::Id) {
-            faikout_matter_set_powerful(val->val.b);
+            faikout_matter_set_extra(endpoint - MATTER_EXTRA_FIRST_ENDPOINT, val->val.b);
         }
         return ESP_OK;
     }
@@ -272,16 +279,20 @@ static void report_on_chip_task(intptr_t context)
         s_reporting_fan = false;
     }
 
-    val = esp_matter_bool(s->powerful);
-    attribute::report(s_powerful_endpoint, OnOff::Id, OnOff::Attributes::OnOff::Id, &val);
+    for (int i = 0; i < MATTER_EXTRAS; i++) {
+        if ((s_extras & (1u << i)) && s->extra_known[i]) {
+            val = esp_matter_bool(s->extra[i]);
+            attribute::report(MATTER_EXTRA_FIRST_ENDPOINT + i, OnOff::Id, OnOff::Attributes::OnOff::Id, &val);
+        }
+    }
 
-    if (s->power_w >= 0) {
+    if (s_energy && s->power_w >= 0) {
         power_measurement_set_watts(s->power_w);
     }
 
     // Only on change, because each update sends an energy event.
     static int32_t s_last_energy_wh = -1;
-    if (s->energy_wh >= 0 && s->energy_wh != s_last_energy_wh) {
+    if (s_energy && s->energy_wh >= 0 && s->energy_wh != s_last_energy_wh) {
         s_last_energy_wh = s->energy_wh;
         energy_measurement_set_wh(s_ac_endpoint, s->energy_wh);
     }
@@ -309,6 +320,118 @@ bool matter_bridge_report(const matter_ac_state_t *state)
 // ---------------------------------------------------------------------------------------------
 // Pairing
 
+// This board's own pairing code, instead of the SDK's public test code.
+class BoardPairingData : public chip::DeviceLayer::CommissionableDataProvider
+{
+public:
+    void Set(uint32_t code, uint16_t discriminator)
+    {
+        mCode = code;
+        mDiscriminator = discriminator;
+        esp_fill_random(mSalt, sizeof(mSalt));
+    }
+
+    CHIP_ERROR GetSetupDiscriminator(uint16_t &discriminator) override
+    {
+        discriminator = mDiscriminator;
+        return CHIP_NO_ERROR;
+    }
+    CHIP_ERROR SetSetupDiscriminator(uint16_t) override { return CHIP_ERROR_NOT_IMPLEMENTED; }
+    CHIP_ERROR GetSpake2pIterationCount(uint32_t &iterations) override
+    {
+        iterations = chip::Crypto::kSpake2p_Min_PBKDF_Iterations;
+        return CHIP_NO_ERROR;
+    }
+    CHIP_ERROR GetSpake2pSalt(chip::MutableByteSpan &salt) override
+    {
+        return chip::CopySpanToMutableSpan(chip::ByteSpan(mSalt), salt);
+    }
+    CHIP_ERROR GetSpake2pVerifier(chip::MutableByteSpan &verifier, size_t &length) override
+    {
+        // Slow to work out, so only do it if something asks for it
+        if (!mHaveVerifier) {
+            chip::Crypto::Spake2pVerifier computed;
+            ReturnErrorOnFailure(computed.Generate(chip::Crypto::kSpake2p_Min_PBKDF_Iterations, chip::ByteSpan(mSalt), mCode));
+            chip::MutableByteSpan serialized(mVerifier);
+            ReturnErrorOnFailure(computed.Serialize(serialized));
+            mHaveVerifier = true;
+        }
+        length = sizeof(mVerifier);
+        return chip::CopySpanToMutableSpan(chip::ByteSpan(mVerifier), verifier);
+    }
+    CHIP_ERROR GetSetupPasscode(uint32_t &code) override
+    {
+        code = mCode;
+        return CHIP_NO_ERROR;
+    }
+    CHIP_ERROR SetSetupPasscode(uint32_t) override { return CHIP_ERROR_NOT_IMPLEMENTED; }
+
+private:
+    uint32_t mCode = 0;
+    uint16_t mDiscriminator = 0;
+    bool mHaveVerifier = false;
+    uint8_t mSalt[chip::Crypto::kSpake2p_Max_PBKDF_Salt_Length] = {};
+    chip::Crypto::Spake2pVerifierSerialized mVerifier = {};
+};
+
+static BoardPairingData s_pairing_data;
+
+// The SDK's device details, with the name set in Faikout's settings as the product name.
+class BoardDeviceInfo : public chip::DeviceLayer::DeviceInstanceInfoProvider
+{
+public:
+    void Set(chip::DeviceLayer::DeviceInstanceInfoProvider *base, const char *name)
+    {
+        mBase = base;
+        strlcpy(mName, name, sizeof(mName));
+    }
+
+    CHIP_ERROR GetProductName(char *buf, size_t size) override
+    {
+        if (!*mName) {
+            return mBase->GetProductName(buf, size);
+        }
+        VerifyOrReturnError(strlen(mName) < size, CHIP_ERROR_BUFFER_TOO_SMALL);
+        strlcpy(buf, mName, size);
+        return CHIP_NO_ERROR;
+    }
+    CHIP_ERROR GetVendorName(char *buf, size_t size) override { return mBase->GetVendorName(buf, size); }
+    CHIP_ERROR GetVendorId(uint16_t &id) override { return mBase->GetVendorId(id); }
+    CHIP_ERROR GetProductId(uint16_t &id) override { return mBase->GetProductId(id); }
+    CHIP_ERROR GetPartNumber(char *buf, size_t size) override { return mBase->GetPartNumber(buf, size); }
+    CHIP_ERROR GetProductURL(char *buf, size_t size) override { return mBase->GetProductURL(buf, size); }
+    CHIP_ERROR GetProductLabel(char *buf, size_t size) override { return mBase->GetProductLabel(buf, size); }
+    CHIP_ERROR GetSerialNumber(char *buf, size_t size) override { return mBase->GetSerialNumber(buf, size); }
+    CHIP_ERROR GetManufacturingDate(uint16_t &year, uint8_t &month, uint8_t &day) override
+    {
+        return mBase->GetManufacturingDate(year, month, day);
+    }
+    CHIP_ERROR GetHardwareVersion(uint16_t &version) override { return mBase->GetHardwareVersion(version); }
+    CHIP_ERROR GetHardwareVersionString(char *buf, size_t size) override { return mBase->GetHardwareVersionString(buf, size); }
+    CHIP_ERROR GetRotatingDeviceIdUniqueId(chip::MutableByteSpan &id) override { return mBase->GetRotatingDeviceIdUniqueId(id); }
+
+private:
+    chip::DeviceLayer::DeviceInstanceInfoProvider *mBase = nullptr;
+    char mName[33] = "";
+};
+
+static BoardDeviceInfo s_device_info;
+static char s_name[33];
+
+bool matter_bridge_valid_code(uint32_t code)
+{
+    return chip::SetupPayload::IsValidSetupPIN(code);
+}
+
+uint32_t matter_bridge_random_code(void)
+{
+    uint32_t code;
+    do {
+        code = esp_random() % 100000000;
+    } while (!matter_bridge_valid_code(code));
+    return code;
+}
+
 // Faikout is already on the network, so pairing only ever needs mDNS.
 static void open_window_on_chip_task(intptr_t)
 {
@@ -320,6 +443,20 @@ static void open_window_on_chip_task(intptr_t)
                                                           chip::CommissioningWindowAdvertisement::kDnssdOnly);
     if (err != CHIP_NO_ERROR) {
         ESP_LOGE(TAG, "Failed to open pairing window: %" CHIP_ERROR_FORMAT, err.Format());
+    }
+}
+
+static void forget_on_chip_task(intptr_t)
+{
+    chip::Server::GetInstance().GetFabricTable().DeleteAllFabrics();
+    ESP_LOGE(TAG, "Removed all pairings");
+    open_window_on_chip_task(0);
+}
+
+void matter_bridge_forget(void)
+{
+    if (s_started) {
+        PlatformMgr().ScheduleWork(forget_on_chip_task, 0);
     }
 }
 
@@ -386,6 +523,9 @@ static void event_cb(const chip::DeviceLayer::ChipDeviceEvent *event, intptr_t)
 // ---------------------------------------------------------------------------------------------
 // Startup
 
+static node_t *s_node;
+static endpoint_t *s_placeholders[MATTER_EXTRAS];
+
 static bool create_data_model()
 {
     node::config_t node_config;
@@ -419,29 +559,52 @@ static bool create_data_model()
         return false;
     }
 
-    cluster::electrical_power_measurement::config_t power_config;
-    power_config.feature_flags = cluster::electrical_power_measurement::feature::alternating_current::get_id();
-    power_config.delegate = power_measurement_delegate();
-    if (!cluster::electrical_power_measurement::create(ac, &power_config, CLUSTER_FLAG_SERVER)) {
-        return false;
+    if (s_energy) {
+        cluster::electrical_power_measurement::config_t power_config;
+        power_config.feature_flags = cluster::electrical_power_measurement::feature::alternating_current::get_id();
+        power_config.delegate = power_measurement_delegate();
+        if (!cluster::electrical_power_measurement::create(ac, &power_config, CLUSTER_FLAG_SERVER)) {
+            return false;
+        }
+
+        cluster::electrical_energy_measurement::config_t energy_config;
+        energy_config.feature_flags = cluster::electrical_energy_measurement::feature::imported_energy::get_id() |
+                                      cluster::electrical_energy_measurement::feature::cumulative_energy::get_id();
+        if (!cluster::electrical_energy_measurement::create(ac, &energy_config, CLUSTER_FLAG_SERVER)) {
+            return false;
+        }
     }
 
-    cluster::electrical_energy_measurement::config_t energy_config;
-    energy_config.feature_flags = cluster::electrical_energy_measurement::feature::imported_energy::get_id() |
-                                  cluster::electrical_energy_measurement::feature::cumulative_energy::get_id();
-    if (!cluster::electrical_energy_measurement::create(ac, &energy_config, CLUSTER_FLAG_SERVER)) {
-        return false;
+    // Each switch gets its fixed endpoint number. One that isn't chosen still takes its number, as a
+    // placeholder that remove_placeholders() takes away once Matter is running.
+    for (int i = 0; i < MATTER_EXTRAS; i++) {
+        endpoint_t *extra;
+        if (s_extras & (1u << i)) {
+            endpoint::on_off_plug_in_unit::config_t switch_config;
+            switch_config.on_off.on_off = false;
+            extra = endpoint::on_off_plug_in_unit::create(node, &switch_config, ENDPOINT_FLAG_NONE, nullptr);
+        } else {
+            extra = endpoint::create(node, ENDPOINT_FLAG_DESTROYABLE, nullptr);
+            s_placeholders[i] = extra;
+        }
+        if (!extra || endpoint::get_id(extra) != MATTER_EXTRA_FIRST_ENDPOINT + i) {
+            ESP_LOGE(TAG, "Switch %d didn't get endpoint %d", i, MATTER_EXTRA_FIRST_ENDPOINT + i);
+            return false;
+        }
     }
+    s_node = node;
+    return s_ac_endpoint == 1;
+}
 
-    // Powerful mode as a separate switch.
-    endpoint::on_off_plug_in_unit::config_t powerful_config;
-    powerful_config.on_off.on_off = false;
-    endpoint_t *powerful = endpoint::on_off_plug_in_unit::create(node, &powerful_config, ENDPOINT_FLAG_NONE, nullptr);
-    if (!powerful) {
-        return false;
+// Removing an endpoint needs Matter running, so placeholders go once it has started.
+static void remove_placeholders()
+{
+    for (int i = 0; i < MATTER_EXTRAS; i++) {
+        if (s_placeholders[i]) {
+            endpoint::destroy(s_node, s_placeholders[i]);
+            s_placeholders[i] = nullptr;
+        }
     }
-    s_powerful_endpoint = endpoint::get_id(powerful);
-    return true;
 }
 
 #ifdef CONFIG_REVK_ETHERNET
@@ -495,7 +658,11 @@ static void hand_wifi_to_app_on_chip_task(intptr_t context)
     if (err != CHIP_NO_ERROR) {
         ESP_LOGE(TAG, "Failed to leave Wi-Fi to the application: %" CHIP_ERROR_FORMAT, err.Format());
     }
-    energy_measurement_init(static_cast<uint16_t>(context));
+    if (s_energy) {
+        energy_measurement_init(static_cast<uint16_t>(context));
+    }
+    s_device_info.Set(chip::DeviceLayer::GetDeviceInstanceInfoProvider(), s_name);
+    chip::DeviceLayer::SetDeviceInstanceInfoProvider(&s_device_info);
     PrintOnboardingCodes(chip::RendezvousInformationFlags(chip::RendezvousInformationFlag::kOnNetwork));
 }
 
@@ -504,6 +671,8 @@ static void matter_task(void *)
     while (!network_ready()) {
         vTaskDelay(pdMS_TO_TICKS(500));
     }
+    // Give IPv6 a moment to settle. Reconnecting to a controller failed when tried straight away.
+    vTaskDelay(pdMS_TO_TICKS(3000));
     ESP_LOGE(TAG, "Network is up, starting. Free heap %u", static_cast<unsigned>(esp_get_free_heap_size()));
 
     if (!create_data_model()) {
@@ -511,12 +680,14 @@ static void matter_task(void *)
         vTaskDelete(nullptr);
         return;
     }
+    esp_matter::set_custom_commissionable_data_provider(&s_pairing_data);
     esp_err_t err = esp_matter::start(event_cb);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start: %s", esp_err_to_name(err));
         vTaskDelete(nullptr);
         return;
     }
+    remove_placeholders();
     PlatformMgr().ScheduleWork(hand_wifi_to_app_on_chip_task, static_cast<intptr_t>(s_ac_endpoint));
     s_started = true;
 #ifdef CONFIG_REVK_ETHERNET
@@ -527,7 +698,11 @@ static void matter_task(void *)
     vTaskDelete(nullptr);
 }
 
-void matter_bridge_start(void)
+void matter_bridge_start(uint32_t code, uint16_t discriminator, const char *name, uint32_t extras, bool energy)
 {
+    s_extras = extras;
+    s_energy = energy;
+    s_pairing_data.Set(code, discriminator);
+    strlcpy(s_name, name ? name : "", sizeof(s_name));
     xTaskCreate(matter_task, "matter_start", 8192, nullptr, 5, nullptr);
 }

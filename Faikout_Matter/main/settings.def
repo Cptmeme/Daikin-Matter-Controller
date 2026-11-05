@@ -9,7 +9,21 @@ u8	s21.tries	10		.live					// Repeat attempts at S21 controls
 
 bit	web.control	1							// Web based controls
 bit	web.settings	1							// Web based settings
-bit	matter.enable	1							// Matter over Wi-Fi (restart to apply)
+bit	matter.enable	0							// Matter. Off until you turn it on
+u32	matter.code	0							// Matter pairing code, 8 digits. A board picks its own if this isn't valid
+u16	matter.id	65535							// Matter discriminator, 0 to 4095. A board picks its own if this isn't valid
+s	matter.name								// Name in home apps when adding this device
+bit	mx.energy								// Matter: power and energy use
+bit	mx.powerful								// Matter: Powerful switch
+bit	mx.night								// Matter: Night (quiet fan) switch
+bit	mx.econo								// Matter: Econo switch
+bit	mx.comfort								// Matter: Comfort switch
+bit	mx.streamer								// Matter: Streamer switch
+bit	mx.sensor								// Matter: Intelligent eye sensor switch
+bit	mx.quiet								// Matter: Outdoor quiet switch
+bit	mx.swingh								// Matter: Swing horizontal switch
+bit	mx.swingv								// Matter: Swing vertical switch
+bit	mx.led								// Matter: LED switch
 
 s	model									// Set model name manually
 s	region		eu							// Region (legacy URLs)

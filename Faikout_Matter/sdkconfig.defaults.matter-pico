@@ -26,3 +26,7 @@ CONFIG_CHIP_MEM_ALLOC_MODE_EXTERNAL=y
 
 # Status LED, read from the PCB file: red, green and blue on a common-anode LED
 CONFIG_REVK_BLINK="-8 -19 -7"
+
+# Keep TLS buffers in PSRAM, so internal memory stays free for Wi-Fi, BLE and Matter
+CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC=n
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
